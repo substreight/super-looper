@@ -1,41 +1,61 @@
-# loop-design
+```
+ ____   _   _  ____   _____  ____  
+/ ___| | | | ||  _ \ | ____||  _ \ 
+\___ \ | | | || |_) ||  _|  | |_) |
+ ___) || |_| ||  __/ | |___ |  _ < 
+|____/  \___/ |_|    |_____||_| \_\
+ _       ___    ___   ____   _____  ____  
+| |     / _ \  / _ \ |  _ \ | ____||  _ \ 
+| |    | | | || | | || |_) ||  _|  | |_) |
+| |___ | |_| || |_| ||  __/ | |___ |  _ < 
+|_____| \___/  \___/ |_|    |_____||_| \_\
+```
 
-A meta-skill for designing clean, minimal **agentic loops** — and for deciding whether a loop is even warranted (usually it isn't).
+# super-looper
 
 > **A loop is a goal plus a gate. The gate is the design.**
 
-An agentic loop runs DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE on its own, until an objective gate passes or a hard limit trips — no human pushing each step. This skill teaches the *principles* (design the verifier first; keep state on disk; set three stop conditions; separate maker from checker), enforces the non‑negotiables with a machine‑checkable spec + validator, and — crucially — defaults to **"don't build a loop."** Talking someone out of an unnecessary loop is a successful use of it.
+**super-looper** is a meta-skill for designing clean, minimal **agentic loops** — and, more often, for talking you *out* of building one.
 
-## What's here
-- **`SKILL.md`** — the skill itself (load it into your agent harness).
-- **`references/`** — `loop-spec-templates.md` (5 filled templates), `state-and-verification.md` (fresh‑restart vs compaction; the verifier ladder), `failure-modes.md` (what each missing part breaks), `evidence.md` (verified citations).
-- **`schemas/loop-spec.schema.json`** — JSON Schema for a loop spec.
-- **`scripts/validate_loop_spec.py`** — dependency‑free validator (structural + the skill's judgment lints) and renderer. Importable as `validate(spec) -> (errors, warnings)`.
-- **`examples/nightly-export.loop.json`** — a worked, valid spec.
-- **`evals/`** — the skill's own gate: labeled scenarios + a deterministic scorer (`EVAL.md`).
+The unglamorous pitch: most "autonomous loop" ideas are net-negative — they spin, drift, or quietly bill you to ship confidently-wrong work *faster*. So super-looper's first job is to say **no**. Its second is to make the rare loop that *is* worth building actually converge — by forcing you to design the gate before the machinery, keep state out of the context window, and never let the thing being judged grade itself. It enforces the non-negotiables with a machine-checkable spec + a **zero-dependency validator**, and ships with **its own eval suite** so the skill can't silently regress.
 
-## Use it
-**As a skill:** point your agent at `SKILL.md` (e.g. drop the folder into your skills directory). Ask it to design — or talk you out of — a loop; it qualifies via Step 0, designs the gate first, and emits a spec.
+## The one idea
+An agentic loop runs DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE on its own, until an objective gate passes or a hard limit trips — no human pushing each step. The part that makes it a loop and not a model talking to itself is **VERIFY**: a check, ideally outside the model, that can actually *fail* the work.
+
+So you design the **verifier first**. If you can't write a gate that fails bad work automatically — and that gates the *deliverable*, not just the plumbing — it isn't a loop yet. Most tasks aren't.
+
+## What's in the box
+| path | what |
+|---|---|
+| `SKILL.md` | the skill — load it into your agent harness |
+| `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
+| `schemas/` + `scripts/` | JSON spec schema + a dependency-free validator (`validate(spec) -> errors, warnings`) · 20 tests |
+| `examples/` | a worked, valid loop spec |
+| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (8/8 baseline) |
+
+## Quickstart
+**Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision.
 
 **Validate a spec:**
 ```
-python scripts/validate_loop_spec.py my-loop.json            # exit 1 on error
-python scripts/validate_loop_spec.py my-loop.json --render    # print the human-readable spec
-python scripts/validate_loop_spec.py my-loop.json --strict    # warnings are errors
+python scripts/validate_loop_spec.py my-loop.json --render
 ```
-Zero‑dependency: uses `jsonschema` if installed, falls back to a built‑in checker.
+Zero deps — uses `jsonschema` if installed, falls back to a built-in checker.
 
-**Run the eval** (after any edit to the skill):
+**Gate the skill itself** (run after any edit to it):
 ```
 cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 8/8
 ```
-See `evals/EVAL.md` for producing fresh results from blind agents.
 
-## The one rule
-Design the **verifier before the loop body.** If you can't write a gate that automatically fails bad work — and that gates the *deliverable*, not just the plumbing — the task isn't a loop yet. Most tasks aren't.
+## The five-part anatomy
+- **Goal** — a contract, not a prompt: end state · evidence · constraints · budget.
+- **Verifier** — the gate, ranked by trust: tool > independent model > human. Self-grading is *off* the ladder.
+- **State** — on disk, not accumulating in the context. Clean-ish context per unit of work.
+- **Stop conditions** — success · a hard cap (iterations **and** budget) · no-progress detection. All three.
+- **Maker ≠ checker** — don't let the agent that did the work be its own only gate.
 
-## Evidence
-The load‑bearing claims are sourced in `references/evidence.md` (self‑correction limits, self‑preference bias, context rot, verifiable rewards). The named techniques ("Ralph," evaluator‑optimizer, harnesses) are mostly blog‑evidenced — design from the principles.
+## Why trust any of this
+The load-bearing claims are sourced in [`references/evidence.md`](references/evidence.md): self-correction limits (Huang 2024), self-preference bias (Panickssery 2024), context rot (Liu/TACL 2024; Chroma & NoLiMa 2025), and verifiable rewards (Tulu 3; DeepSeek-R1). The named techniques ("Ralph," evaluator-optimizer, harnesses) are mostly blog-evidenced — so design from the principles, not the hype.
 
 ## License
 MIT — see [`LICENSE`](LICENSE).
