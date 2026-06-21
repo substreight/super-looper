@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 
 from . import __version__
@@ -17,12 +18,34 @@ from .case_study import (
     write_reports,
 )
 from .design import build_spec, command_questions, read_answers
+from .remote_runner import (
+    RemoteRunnerError,
+    build_bootstrap_plan,
+    build_remote_runner_plan,
+    create_runner_key,
+)
 from .validate import max_autonomy, render, render_plain, validate
 
 
 def _load_json(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _write_json(path, payload):
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
+
+
+def _profile_value(profile, key, fallback=None):
+    value = profile.get(key, fallback)
+    if value == "":
+        return fallback
+    return value
 
 
 def _print_validation(errors, warnings):
@@ -214,6 +237,89 @@ def cmd_case_study_report(args):
     return 0
 
 
+def cmd_runner_plan(args):
+    try:
+        profile = _load_json(args.profile) if args.profile else {}
+        remote = args.remote or _profile_value(profile, "remote")
+        identity_file = args.identity_file or _profile_value(profile, "identity_file")
+        if not remote:
+            raise RemoteRunnerError("--remote is required unless --profile supplies remote")
+        if not identity_file:
+            raise RemoteRunnerError("--identity-file is required unless --profile supplies identity_file")
+        plan = build_remote_runner_plan(
+            remote=remote,
+            identity_file=identity_file,
+            case_path=args.case,
+            repo=args.repo,
+            remote_workdir=args.remote_workdir or _profile_value(
+                profile, "remote_workdir", "/tmp/super-looper-runs"
+            ),
+            run_id=args.run_id,
+            setup=args.setup,
+            isolation=args.isolation or _profile_value(profile, "isolation", "container"),
+            allow_network_setup=args.allow_network_setup,
+            allow_network_run=args.allow_network_run,
+            accept_new_host_key=args.accept_new_host_key
+            or bool(_profile_value(profile, "accept_new_host_key", False)),
+            known_hosts=args.known_hosts or _profile_value(profile, "known_hosts"),
+            allow_root=args.allow_root,
+            keep_remote_workdir=args.keep_remote_workdir,
+            container_engine=args.container_engine
+            or _profile_value(profile, "container_engine", "podman"),
+        )
+    except RemoteRunnerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.out:
+        _write_json(args.out, plan)
+    print(json.dumps(plan, indent=2))
+    return 0
+
+
+def cmd_runner_keygen(args):
+    try:
+        result = create_runner_key(
+            name=args.name,
+            out_dir=args.out_dir,
+            force=args.force,
+            comment=args.comment,
+        )
+    except RemoteRunnerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.out:
+        _write_json(args.out, result)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_runner_bootstrap_plan(args):
+    try:
+        plan = build_bootstrap_plan(
+            provider=args.provider,
+            ip=args.ip,
+            admin_identity_file=args.admin_identity_file,
+            runner_public_key_file=args.runner_public_key,
+            runner_identity_file=args.runner_identity_file,
+            name=args.name,
+            admin_user=args.admin_user,
+            runner_user=args.runner_user,
+            remote_workdir=args.remote_workdir,
+            container_engine=args.container_engine,
+            accept_new_host_key=args.accept_new_host_key,
+            known_hosts=args.known_hosts,
+        )
+    except RemoteRunnerError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.profile_out:
+        _write_json(args.profile_out, plan["runner_profile"])
+    if args.out:
+        _write_json(args.out, plan)
+    print(json.dumps(plan, indent=2))
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="super-looper", description="Design and validate agentic loop specs.")
     parser.add_argument("--version", action="version", version=f"super-looper {__version__}")
@@ -301,6 +407,74 @@ def build_parser():
     case_report.add_argument("--for", dest="for_audience", choices=["maintainer", "pr", "all"], default="maintainer")
     case_report.add_argument("--print", dest="print_report", action="store_true", help="print report markdown instead of writing files")
     case_report.set_defaults(func=cmd_case_study_report)
+
+    runner = sub.add_parser("runner", help="plan isolated case-study execution on remote runners")
+    runner_sub = runner.add_subparsers(dest="runner_command", required=True)
+
+    runner_keygen = runner_sub.add_parser("keygen", help="create a dedicated runner SSH keypair")
+    runner_keygen.add_argument("--name", required=True, help="runner/profile name")
+    runner_keygen.add_argument("--out-dir", default=".super-looper/runners", help="directory for the keypair")
+    runner_keygen.add_argument("--comment", help="SSH public-key comment")
+    runner_keygen.add_argument("--force", action="store_true", help="replace an existing runner keypair")
+    runner_keygen.add_argument("--out", help="write the JSON key metadata to this path")
+    runner_keygen.set_defaults(func=cmd_runner_keygen)
+
+    runner_bootstrap = runner_sub.add_parser(
+        "bootstrap-plan",
+        help="write a provider-aware bootstrap plan for a fresh disposable Linux VM",
+    )
+    runner_bootstrap.add_argument(
+        "--provider",
+        choices=["digitalocean", "aws", "gcp", "azure", "hetzner", "custom"],
+        default="digitalocean",
+        help="VM provider preset; execution remains generic SSH",
+    )
+    runner_bootstrap.add_argument("--ip", required=True, help="VM IP address or DNS name")
+    runner_bootstrap.add_argument(
+        "--admin-identity-file",
+        required=True,
+        help="temporary admin SSH private key for bootstrapping the VM",
+    )
+    runner_bootstrap.add_argument(
+        "--runner-public-key",
+        required=True,
+        help="public key to install for the non-root runner user",
+    )
+    runner_bootstrap.add_argument(
+        "--runner-identity-file",
+        required=True,
+        help="matching runner private key path to store in the reusable profile",
+    )
+    runner_bootstrap.add_argument("--name", default="sandbox1", help="runner/profile name")
+    runner_bootstrap.add_argument("--admin-user", default="root", help="admin bootstrap user")
+    runner_bootstrap.add_argument("--runner-user", default="runner", help="non-root runner account to create")
+    runner_bootstrap.add_argument("--remote-workdir", default="/tmp/super-looper-runs", help="dedicated remote parent directory")
+    runner_bootstrap.add_argument("--container-engine", choices=["podman", "docker"], default="podman", help="container engine to install/use")
+    runner_bootstrap.add_argument("--accept-new-host-key", action="store_true", help="use StrictHostKeyChecking=accept-new instead of requiring a pinned host key")
+    runner_bootstrap.add_argument("--known-hosts", help="known_hosts file to pin the VM host key")
+    runner_bootstrap.add_argument("--profile-out", help="write the reusable runner profile JSON here")
+    runner_bootstrap.add_argument("--out", help="write the full bootstrap plan JSON here")
+    runner_bootstrap.set_defaults(func=cmd_runner_bootstrap_plan)
+
+    runner_plan = runner_sub.add_parser("plan", help="write a hardened remote-VM execution plan without running SSH")
+    runner_plan.add_argument("--profile", help="runner profile JSON from runner bootstrap-plan --profile-out")
+    runner_plan.add_argument("--remote", help="ssh://user@host[:port] or user@host[:port]")
+    runner_plan.add_argument("--identity-file", help="dedicated SSH private key for the runner VM")
+    runner_plan.add_argument("--case", required=True, help="case-study manifest path or directory to bundle")
+    runner_plan.add_argument("--repo", help="public repo URL to clone inside the VM")
+    runner_plan.add_argument("--remote-workdir", help="dedicated remote parent directory")
+    runner_plan.add_argument("--run-id", help="stable run id for the remote workdir")
+    runner_plan.add_argument("--setup", choices=["none", "deps"], default="none", help="dependency setup mode")
+    runner_plan.add_argument("--isolation", choices=["container", "remote-vm"], help="remote execution isolation tier")
+    runner_plan.add_argument("--container-engine", choices=["podman", "docker"], help="container engine used on the remote VM")
+    runner_plan.add_argument("--allow-network-setup", action="store_true", help="allow network only during explicit dependency setup")
+    runner_plan.add_argument("--allow-network-run", action="store_true", help="allow network during verifier execution")
+    runner_plan.add_argument("--accept-new-host-key", action="store_true", help="use StrictHostKeyChecking=accept-new instead of requiring a pinned host key")
+    runner_plan.add_argument("--known-hosts", help="known_hosts file to pin the VM host key")
+    runner_plan.add_argument("--allow-root", action="store_true", help="permit root SSH user for disposable VMs")
+    runner_plan.add_argument("--keep-remote-workdir", action="store_true", help="do not delete the remote run directory in the cleanup plan")
+    runner_plan.add_argument("--out", help="write the JSON plan to this path")
+    runner_plan.set_defaults(func=cmd_runner_plan)
 
     return parser
 

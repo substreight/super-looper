@@ -32,7 +32,7 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
 | `src/super_looper/` | installable CLI + importable validator/compiler package |
-| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 54 tests |
+| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 64 tests |
 | `examples/` | worked loop specs + interview answer fixtures, including a Headroom case study |
 | `case-studies/` | public-target manifests and reports that show what autonomy level a real task actually earns |
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
@@ -76,6 +76,30 @@ super-looper case-study report case-studies/headroom-ast-compression/runs/<run-i
 Case-study runs write `repo.json`, `loop.json`, `verifier-results.json`, `scope-check.json`, `diff.patch`, `summary.json`, and maintainer/PR markdown reports. The runner does not push or open PRs; it packages evidence so a human can decide whether to share a report or ship a patch.
 
 `resolve-verifier` is the normal integrated path: it runs the confirmed repo-local verifier when it exists; if the declared verifier is missing, it falls back to a **shadow verifier** by default. Use `--no-shadow` to disable that fallback and produce a missing-gate report instead. A passing shadow verifier means "this proposed gate appears viable," not "upstream is verified."
+
+**Prepare a secure remote VM runner before installing repo dependencies:**
+```
+super-looper runner keygen --name headroom-sandbox --out-dir .super-looper/runners
+
+super-looper runner bootstrap-plan \
+  --provider digitalocean \
+  --ip 203.0.113.10 \
+  --admin-identity-file ~/.ssh/do_bootstrap_key \
+  --runner-public-key .super-looper/runners/headroom-sandbox_ed25519.pub \
+  --runner-identity-file .super-looper/runners/headroom-sandbox_ed25519 \
+  --profile-out .super-looper/runners/headroom-sandbox.profile.json \
+  --out bootstrap-plan.json
+
+super-looper runner plan \
+  --profile .super-looper/runners/headroom-sandbox.profile.json \
+  --case case-studies/headroom-ast-compression \
+  --repo https://github.com/chopratejas/headroom \
+  --setup deps \
+  --allow-network-setup \
+  --isolation container \
+  --out remote-plan.json
+```
+Remote plans are local JSON only: they validate a hardened SSH/container policy without executing SSH. `bootstrap-plan` supports `digitalocean`, `aws`, `gcp`, `azure`, `hetzner`, and `custom` presets; the core runner is provider-neutral SSH. Defaults are credential-spillage resistant: dedicated runner key, no agent forwarding, no password auth, strict host-key checking, no host home/credential/package-cache mounts, verifier network disabled unless explicitly allowed, artifact allowlist only, and remote workdir cleanup by default. See [`references/remote-runners.md`](references/remote-runners.md).
 
 **Gate the skill itself** (run after any edit to it):
 ```
