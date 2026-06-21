@@ -17,6 +17,7 @@ from super_looper.case_study import (  # noqa: E402
     check_scope,
     create_manifest,
     design_case_study,
+    resolve_verifier,
     run_case_study,
     simulate_shadow_verifier,
     verify_run,
@@ -213,6 +214,78 @@ def test_shadow_verifier_respects_scope_before_running():
         assert not run["summary"]["scope_passed"], run
         assert not run["summary"]["ready_for_shadow_report"], run
         assert run["shadow_verifier"]["status"] == "shadow_failed", run
+
+
+def test_resolve_verifier_runs_confirmed_gate_when_path_exists():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        _write_text(os.path.join(repo, "tests", "test_ok.py"), "def test_ok():\n    assert True\n")
+
+        case_dir = os.path.join(root, "case")
+        created = create_manifest(
+            case_dir,
+            "https://example.test/repo.git",
+            verifier=[f'"{sys.executable}" -m pytest tests/test_ok.py'],
+            may_touch=["tests/"],
+            must_not_touch=["secrets/"],
+            max_runtime_seconds=60,
+        )
+        _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
+
+        run = resolve_verifier(created["manifest_path"], repo, run_id="resolve-1")
+        assert run["summary"]["evidence_level"] == "confirmed_local", run
+        assert run["summary"]["claim_allowed"] == "local_verification", run
+        assert run["summary"]["ready_for_pr_claim"], run
+        assert run["verifier_resolution"]["status"] == "confirmed_gate_found", run
+
+
+def test_resolve_verifier_defaults_to_shadow_when_declared_path_missing():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        _fake_headroom_repo(repo)
+
+        case_dir = os.path.join(root, "case")
+        created = create_manifest(
+            case_dir,
+            "https://example.test/repo.git",
+            verifier=[f'"{sys.executable}" -m pytest tests/test_missing_corpus.py'],
+            may_touch=["tests/"],
+            must_not_touch=["secrets/"],
+            max_runtime_seconds=60,
+        )
+        _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
+
+        run = resolve_verifier(created["manifest_path"], repo, run_id="resolve-1")
+        assert run["summary"]["evidence_level"] == "shadow", run
+        assert run["summary"]["claim_allowed"] == "proposal_only", run
+        assert not run["summary"]["ready_for_pr_claim"], run
+        assert run["verifier_resolution"]["shadow_enabled"] is True, run
+        assert run["verifier_resolution"]["missing_paths"] == ["tests/test_missing_corpus.py"], run
+
+
+def test_resolve_verifier_no_shadow_reports_missing_gate():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+
+        case_dir = os.path.join(root, "case")
+        created = create_manifest(
+            case_dir,
+            "https://example.test/repo.git",
+            verifier=[f'"{sys.executable}" -m pytest tests/test_missing_corpus.py'],
+            may_touch=["tests/"],
+            must_not_touch=["secrets/"],
+            max_runtime_seconds=60,
+        )
+        _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
+
+        run = resolve_verifier(created["manifest_path"], repo, shadow=False, run_id="resolve-1")
+        assert run["summary"]["evidence_level"] == "missing", run
+        assert run["summary"]["claim_allowed"] == "none", run
+        assert not run["summary"]["ready_for_shadow_report"], run
+        assert not os.path.exists(os.path.join(run["run_dir"], "shadow.patch"))
+        assert run["verifier_resolution"]["status"] == "declared_verifier_missing_shadow_disabled", run
 
 
 def _run_all():

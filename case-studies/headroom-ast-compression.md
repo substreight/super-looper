@@ -45,6 +45,8 @@ Run the local case-study harness against an already-cloned Headroom checkout:
 
 ```bash
 super-looper case-study design case-studies/headroom-ast-compression
+super-looper case-study resolve-verifier case-studies/headroom-ast-compression --repo-path ../headroom-loop-case
+super-looper case-study resolve-verifier case-studies/headroom-ast-compression --repo-path ../headroom-loop-case --no-shadow
 super-looper case-study run case-studies/headroom-ast-compression --repo-path ../headroom-loop-case
 super-looper case-study simulate-verifier case-studies/headroom-ast-compression --repo-path ../headroom-loop-case --template python-ast-corpus
 super-looper case-study verify case-studies/headroom-ast-compression/runs/<run-id>

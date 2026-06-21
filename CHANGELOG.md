@@ -10,6 +10,7 @@ Installable CLI package.
 - **CI:** added GitHub Actions coverage for script tests, behavioral evals, package install, and packaged CLI smoke tests.
 - **Case studies:** added a dependency-free `super-looper case-study` harness with manifest creation, design compilation, local verifier runs, diff/scope guards, run summaries, and maintainer/PR markdown reports.
 - **Shadow verifiers:** added `case-study simulate-verifier` for proposing and running verifier tests from artifacts without modifying the target checkout; reports now distinguish shadow evidence from upstream verification.
+- **Verifier resolution:** added `case-study resolve-verifier`, which prefers confirmed repo-local gates and falls back to shadow verifiers by default; `--no-shadow` reports missing gates without generating proposals.
 - **Headroom example:** added a real-repo Headroom AST-compression loop design fixture, manifest, and write-up; it compiles to a clean L2 spec and documents why L3 is not yet earned.
 
 ## 0.3.0 — 2026-06-21

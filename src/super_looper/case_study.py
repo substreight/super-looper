@@ -288,6 +288,46 @@ def _quote_arg(path: str) -> str:
     return '"' + path.replace('"', '\\"') + '"'
 
 
+def _command_tokens(command: str) -> List[str]:
+    return [part.strip("\"'") for part in re.findall(r'"[^"]+"|\'[^\']+\'|\S+', command)]
+
+
+def _looks_like_path(token: str) -> bool:
+    if not token or token.startswith("-"):
+        return False
+    if token.lower().endswith((".exe", ".bat", ".cmd")):
+        return False
+    if token in {"python", "python3", "pytest", "py.test", "npm", "pnpm", "yarn", "cargo", "make"}:
+        return False
+    if token.endswith((".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".java", ".json", ".toml", ".yaml", ".yml")):
+        return True
+    return "/" in token or "\\" in token or token.startswith(".")
+
+
+def _declared_verifier_status(manifest: Dict[str, Any], repo_path: str) -> Dict[str, Any]:
+    commands = list(manifest.get("verifier") or [])
+    candidate_paths = []
+    missing_paths = []
+    for command in commands:
+        for token in _command_tokens(command):
+            if not _looks_like_path(token):
+                continue
+            token = token.split("::", 1)[0]
+            if not token:
+                continue
+            candidate_paths.append(token)
+            path = token if os.path.isabs(token) else os.path.join(repo_path, token)
+            if not os.path.exists(path):
+                missing_paths.append(token)
+    return {
+        "declared_commands": commands,
+        "candidate_paths": sorted(set(candidate_paths)),
+        "missing_paths": sorted(set(missing_paths)),
+        "has_declared_verifier": bool(commands),
+        "declared_verifier_exists": bool(commands) and not missing_paths,
+    }
+
+
 def _pytest_config_arg(repo_path: str) -> str:
     for name in ("pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"):
         path = os.path.join(repo_path, name)
@@ -666,6 +706,131 @@ def simulate_shadow_verifier(
     return {"run_dir": run_dir, "summary": summary, "shadow_verifier": shadow}
 
 
+def _base_run_artifacts(
+    run_dir: str,
+    manifest: Dict[str, Any],
+    repo_path: str,
+    loop_spec: Optional[Dict[str, Any]],
+    issue_note: str,
+) -> None:
+    os.makedirs(run_dir, exist_ok=True)
+    _json_write(os.path.join(run_dir, "manifest.json"), manifest)
+    if loop_spec is not None:
+        _json_write(os.path.join(run_dir, "loop.json"), loop_spec)
+        level, missing = max_autonomy(loop_spec)
+        _json_write(os.path.join(run_dir, "autonomy.json"), {
+            "max_autonomy": level,
+            "missing_for_more_autonomy": missing,
+        })
+    _json_write(os.path.join(run_dir, "repo.json"), probe_repo(repo_path))
+    _json_write(os.path.join(run_dir, "issue.json"), {
+        "source": manifest.get("issue") or "",
+        "note": issue_note,
+    })
+
+
+def _write_resolution(run_dir: str, resolution: Dict[str, Any]) -> Dict[str, Any]:
+    _json_write(os.path.join(run_dir, "verifier-resolution.json"), resolution)
+    summary = summarize_run(run_dir)
+    _json_write(os.path.join(run_dir, "summary.json"), summary)
+    write_reports(run_dir)
+    return summary
+
+
+def _missing_verifier_run(
+    manifest_path: str,
+    repo_path: str,
+    run_id: Optional[str],
+    resolution: Dict[str, Any],
+) -> Dict[str, Any]:
+    manifest_path, base_dir, manifest = _resolve_manifest(manifest_path)
+    loop_spec = _load_loop_spec(base_dir, manifest)
+    if loop_spec is None:
+        design_case_study(manifest_path)
+        loop_spec = _load_loop_spec(base_dir, manifest)
+    run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
+    assert run_root is not None
+    run_dir = os.path.join(run_root, run_id or _utc_id())
+
+    _base_run_artifacts(
+        run_dir,
+        manifest,
+        repo_path,
+        loop_spec,
+        "Verifier resolution found no confirmed verifier to run.",
+    )
+    _json_write(os.path.join(run_dir, "verifier-results.json"), {
+        "skipped": True,
+        "declared_commands": resolution.get("declared_commands", []),
+        "commands": [],
+        "passed": False,
+    })
+    scope = check_scope(
+        [],
+        manifest.get("may_touch") or (loop_spec or {}).get("scope", {}).get("may_touch", []),
+        manifest.get("must_not_touch") or (loop_spec or {}).get("scope", {}).get("must_not_touch", []),
+    )
+    _json_write(os.path.join(run_dir, "scope-check.json"), scope)
+    summary = _write_resolution(run_dir, resolution)
+    return {"run_dir": run_dir, "summary": summary, "verifier_resolution": resolution}
+
+
+def resolve_verifier(
+    manifest_path: str,
+    repo_path: str,
+    template: str = "python-ast-corpus",
+    shadow: bool = True,
+    run_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve the best available verifier path.
+
+    Prefer confirmed repo-local verifier commands. If declared verifier files are
+    missing, generate a shadow verifier by default. With shadow disabled, write a
+    missing-verifier artifact instead of proposing one.
+    """
+    manifest_path, base_dir, manifest = _resolve_manifest(manifest_path)
+    repo_path = os.path.abspath(repo_path)
+    if not os.path.isdir(repo_path):
+        raise CaseStudyError(f"repo path does not exist: {repo_path}")
+    if _load_loop_spec(base_dir, manifest) is None:
+        design_case_study(manifest_path)
+
+    status = _declared_verifier_status(manifest, repo_path)
+    resolution = {
+        "shadow_enabled": bool(shadow),
+        **status,
+    }
+
+    if status["declared_verifier_exists"]:
+        resolution.update({
+            "status": "confirmed_gate_found",
+            "evidence_level": "confirmed_local",
+            "action": "run_declared_verifier",
+        })
+        result = run_case_study(manifest_path, repo_path, run_id=run_id)
+        result["summary"] = _write_resolution(result["run_dir"], resolution)
+        result["verifier_resolution"] = resolution
+        return result
+
+    if shadow:
+        resolution.update({
+            "status": "declared_verifier_missing_shadow_attempted",
+            "evidence_level": "shadow",
+            "action": "simulate_shadow_verifier",
+        })
+        result = simulate_shadow_verifier(manifest_path, repo_path, template=template, run_id=run_id)
+        result["summary"] = _write_resolution(result["run_dir"], resolution)
+        result["verifier_resolution"] = resolution
+        return result
+
+    resolution.update({
+        "status": "declared_verifier_missing_shadow_disabled",
+        "evidence_level": "missing",
+        "action": "report_missing_verifier",
+    })
+    return _missing_verifier_run(manifest_path, repo_path, run_id, resolution)
+
+
 def _load_optional_json(path: str) -> Dict[str, Any]:
     return _json_load(path) if os.path.exists(path) else {}
 
@@ -680,15 +845,27 @@ def summarize_run(run_dir: str) -> Dict[str, Any]:
     repo = _load_optional_json(os.path.join(run_dir, "repo.json"))
     loop = _load_optional_json(os.path.join(run_dir, "loop.json"))
     shadow = _load_optional_json(os.path.join(run_dir, "shadow-verifier.json"))
+    resolution = _load_optional_json(os.path.join(run_dir, "verifier-resolution.json"))
     errors, warnings = validate(loop) if loop else (["loop.json missing"], [])
     is_shadow = bool(shadow)
+    is_missing = resolution.get("evidence_level") == "missing" or (
+        not is_shadow and verifier.get("skipped") is True
+    )
+    evidence_level = "shadow" if is_shadow else ("missing" if is_missing else "confirmed_local")
+    claim_allowed = {
+        "shadow": "proposal_only",
+        "missing": "none",
+        "confirmed_local": "local_verification",
+    }[evidence_level]
     verifier_passed = verifier.get("passed") is True
     scope_passed = scope.get("passed") is True
     return {
         "name": manifest.get("name") or os.path.basename(os.path.dirname(run_dir)),
         "repo": manifest.get("repo") or repo.get("remote", {}).get("stdout", ""),
         "issue": manifest.get("issue", ""),
-        "evidence_level": "shadow" if is_shadow else "upstream",
+        "evidence_level": evidence_level,
+        "claim_allowed": claim_allowed,
+        "verifier_resolution_status": resolution.get("status"),
         "shadow_status": shadow.get("status"),
         "shadow_proposed_files": shadow.get("proposed_files", []),
         "verifier_passed": verifier_passed,
@@ -701,7 +878,7 @@ def summarize_run(run_dir: str) -> Dict[str, Any]:
         "loop_errors": errors,
         "loop_warnings": warnings,
         "ready_for_shadow_report": is_shadow and verifier_passed and scope_passed and not errors,
-        "ready_for_pr_claim": (not is_shadow) and verifier_passed and scope_passed and not errors,
+        "ready_for_pr_claim": evidence_level == "confirmed_local" and verifier_passed and scope_passed and not errors,
     }
 
 
@@ -713,6 +890,8 @@ def verify_run(run_dir: str) -> Dict[str, Any]:
         failures.append("loop spec is invalid")
     if summary.get("evidence_level") == "shadow":
         failures.append("only shadow verifier evidence is available")
+    if summary.get("evidence_level") == "missing":
+        failures.append("no confirmed verifier is available")
     if summary["verifier_skipped"]:
         failures.append("verifier was skipped")
     elif not summary["verifier_passed"]:
@@ -751,6 +930,7 @@ def render_report(run_dir: str, audience: str = "maintainer") -> str:
     verifier = _load_optional_json(os.path.join(run_dir, "verifier-results.json"))
     scope = _load_optional_json(os.path.join(run_dir, "scope-check.json"))
     shadow = _load_optional_json(os.path.join(run_dir, "shadow-verifier.json"))
+    resolution = _load_optional_json(os.path.join(run_dir, "verifier-resolution.json"))
     loop = _load_optional_json(os.path.join(run_dir, "loop.json"))
 
     title = summary.get("name") or "case study"
@@ -767,6 +947,7 @@ def render_report(run_dir: str, audience: str = "maintainer") -> str:
             f"- Repo: {summary.get('repo') or manifest.get('repo') or 'unknown'}",
             f"- Issue: {summary.get('issue') or 'not provided'}",
             f"- Evidence level: {summary.get('evidence_level') or 'unknown'}",
+            f"- Claim allowed: {summary.get('claim_allowed') or 'unknown'}",
             f"- Max earned autonomy: {summary.get('max_autonomy') or 'unknown'}",
             f"- PR-ready claim: {'yes' if summary.get('ready_for_pr_claim') else 'no'}",
             "",
@@ -775,6 +956,7 @@ def render_report(run_dir: str, audience: str = "maintainer") -> str:
         lines.extend([
             f"- Target issue: {summary.get('issue') or 'not provided'}",
             f"- Evidence level: {summary.get('evidence_level') or 'unknown'}",
+            f"- Claim allowed: {summary.get('claim_allowed') or 'unknown'}",
             f"- Max earned autonomy: {summary.get('max_autonomy') or 'unknown'}",
             f"- Scope check: {'passed' if summary.get('scope_passed') else 'failed'}",
             f"- Verifier: {'passed' if summary.get('verifier_passed') else 'not passed'}",
@@ -793,6 +975,19 @@ def render_report(run_dir: str, audience: str = "maintainer") -> str:
         _commands_table(verifier),
         "",
     ])
+
+    if resolution:
+        lines.extend([
+            "## Verifier Resolution",
+            "",
+            f"- Status: {resolution.get('status') or 'unknown'}",
+            f"- Shadow enabled: {'yes' if resolution.get('shadow_enabled') else 'no'}",
+        ])
+        if resolution.get("missing_paths"):
+            lines.append("- Missing declared paths:")
+            for path in resolution["missing_paths"]:
+                lines.append(f"  - `{path}`")
+        lines.append("")
 
     if shadow:
         lines.extend([
@@ -846,6 +1041,13 @@ def render_report(run_dir: str, audience: str = "maintainer") -> str:
             "## Status",
             "",
             "This shadow verifier passed. Treat it as a proposed test patch, not as upstream verification.",
+        ])
+    elif summary.get("evidence_level") == "missing":
+        lines.extend([
+            "",
+            "## Status",
+            "",
+            "No confirmed verifier was available. Enable shadow verifiers or add/promote a real repo-local gate before making a verification claim.",
         ])
     elif not summary.get("ready_for_pr_claim"):
         lines.extend([
