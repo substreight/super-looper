@@ -8,6 +8,7 @@ dist/
 .pkg-test/
 .pkg-wheel/
 .venv-cli/
+.super-looper/
 case-studies/**/design-report.json
 case-studies/*-runs/
 case-studies/**/runs/
