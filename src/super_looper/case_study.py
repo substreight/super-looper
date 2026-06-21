@@ -484,6 +484,7 @@ until it is committed to the target repository and run in CI.
 """
 
 import ast
+import logging
 from pathlib import Path
 
 from headroom.transforms.code_compressor import CodeAwareCompressor, CodeCompressorConfig
@@ -498,6 +499,7 @@ REPO_ROOT = Path.cwd()
 SOURCE_ROOTS = ("headroom", "tests")
 SAMPLE_LIMIT = {sample_limit}
 INVALID_RATE_THRESHOLD = {threshold!r}
+INVALID_SYNTAX_WARNING = "Code compression produced invalid syntax"
 
 
 def _candidate_files():
@@ -523,11 +525,16 @@ def _candidate_files():
     return files[:SAMPLE_LIMIT]
 
 
-def test_python_ast_compression_corpus_preserves_syntax():
+def _invalid_syntax_warning_count(records):
+    return sum(1 for record in records if INVALID_SYNTAX_WARNING in record.getMessage())
+
+
+def test_python_ast_compression_corpus_preserves_syntax(caplog):
     corpus = _candidate_files()
     assert corpus, "shadow verifier found no Python corpus files with functions/classes"
     if is_tree_sitter_available is not None:
         assert is_tree_sitter_available(), "tree-sitter support is required to exercise AST compression"
+    caplog.set_level(logging.WARNING, logger="headroom.transforms.code_compressor")
 
     compressor = CodeAwareCompressor(
         CodeCompressorConfig(
@@ -542,7 +549,7 @@ def test_python_ast_compression_corpus_preserves_syntax():
 
     invalid_original = []
     invalid_compressed = []
-    exercised = 0
+    successful_compressions = 0
 
     for _, rel, source in corpus:
         try:
@@ -551,20 +558,32 @@ def test_python_ast_compression_corpus_preserves_syntax():
             invalid_original.append(f"{{rel}}:{{exc.lineno}}: {{exc.msg}}")
             continue
 
+        warnings_before = _invalid_syntax_warning_count(caplog.records)
         result = compressor.compress(source, language="python")
-        if result.compressed_bodies:
-            exercised += 1
+        warnings_after = _invalid_syntax_warning_count(caplog.records)
+        file_errors = []
+
+        if warnings_after > warnings_before:
+            file_errors.append("compressor rejected generated invalid syntax")
 
         try:
             ast.parse(result.compressed)
         except SyntaxError as exc:
-            invalid_compressed.append(f"{{rel}}:{{exc.lineno}}: {{exc.msg}}")
+            file_errors.append(f"final compressed output failed ast.parse at line {{exc.lineno}}: {{exc.msg}}")
 
         if not result.syntax_valid:
-            invalid_compressed.append(f"{{rel}}: result.syntax_valid was false")
+            file_errors.append("result.syntax_valid was false")
+
+        if file_errors:
+            invalid_compressed.append(f"{{rel}}: " + "; ".join(file_errors))
+            continue
+
+        compression_ratio = getattr(result, "compression_ratio", 0.0)
+        if result.compressed != source and compression_ratio < 1.0:
+            successful_compressions += 1
 
     assert not invalid_original, "invalid original corpus files:\\n" + "\\n".join(invalid_original[:20])
-    assert exercised > 0, "shadow verifier did not exercise AST body compression"
+    assert successful_compressions > 0, "shadow verifier produced no smaller valid compressed outputs"
 
     invalid_rate = len(invalid_compressed) / max(len(corpus), 1)
     assert invalid_rate <= INVALID_RATE_THRESHOLD, (

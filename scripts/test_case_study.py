@@ -78,7 +78,7 @@ class CodeAwareCompressor:
         self.config = config or CodeCompressorConfig()
 
     def compress(self, source, language=None):
-        return SimpleNamespace(compressed=source, compressed_bodies=1, syntax_valid=True)
+        return SimpleNamespace(compressed=source + "\\n# compressed", compression_ratio=0.9, syntax_valid=True)
 """)
     _write_text(os.path.join(root, "headroom", "sample.py"), """
 def alpha(value: int) -> int:
