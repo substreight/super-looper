@@ -12,11 +12,7 @@
 ███████╗╚██████╔╝╚██████╔╝██║     ███████╗██║  ██║
 ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝
 
-      ┌──▶ discover ─▶ plan ─▶ execute ─▶ verify ─▶ iterate ──┐
-      └─────────────────  ✗ gate fails bad work  ◀────────────┘
 ```
-
-# super-looper
 
 > **A loop is a goal plus a gate. The gate is the design.**
 
