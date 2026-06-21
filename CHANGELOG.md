@@ -8,6 +8,8 @@ Installable CLI package.
 - **Compatibility:** kept `scripts/validate_loop_spec.py` and `scripts/design_loop.py` as thin wrappers so existing repo-local commands still work.
 - **Packaging:** added `pyproject.toml`, optional `jsonschema` extra, package metadata, and build artifact ignores.
 - **CI:** added GitHub Actions coverage for script tests, behavioral evals, package install, and packaged CLI smoke tests.
+- **Case studies:** added a dependency-free `super-looper case-study` harness with manifest creation, design compilation, local verifier runs, diff/scope guards, run summaries, and maintainer/PR markdown reports.
+- **Headroom example:** added a real-repo Headroom AST-compression loop design fixture, manifest, and write-up; it compiles to a clean L2 spec and documents why L3 is not yet earned.
 
 ## 0.3.0 — 2026-06-21
 Unknown-safe compiler + stricter autonomy enforcement.

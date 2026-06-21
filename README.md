@@ -32,8 +32,9 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
 | `src/super_looper/` | installable CLI + importable validator/compiler package |
-| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 44 tests |
-| `examples/` | a worked, valid loop spec + interview answer fixtures |
+| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 49 tests |
+| `examples/` | worked loop specs + interview answer fixtures, including a Headroom case study |
+| `case-studies/` | public-target manifests and reports that show what autonomy level a real task actually earns |
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
 
 ## Quickstart
@@ -61,6 +62,16 @@ super-looper explain my-loop.json
 super-looper max-autonomy my-loop.json --json
 ```
 Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`, otherwise falls back to a built-in checker. The old `python scripts/*.py` commands remain as compatibility wrappers.
+
+**Run a real-repo case study:**
+```
+super-looper case-study init --repo https://github.com/chopratejas/headroom --issue https://github.com/chopratejas/headroom/issues/1233 --out case-studies/headroom-ast-compression
+super-looper case-study design case-studies/headroom-ast-compression
+super-looper case-study run case-studies/headroom-ast-compression --repo-path ../headroom --strict
+super-looper case-study report case-studies/headroom-ast-compression/runs/<run-id> --for maintainer
+super-looper case-study report case-studies/headroom-ast-compression/runs/<run-id> --for pr
+```
+Case-study runs write `repo.json`, `loop.json`, `verifier-results.json`, `scope-check.json`, `diff.patch`, `summary.json`, and maintainer/PR markdown reports. The runner does not push or open PRs; it packages evidence so a human can decide whether to share a report or ship a patch.
 
 **Gate the skill itself** (run after any edit to it):
 ```

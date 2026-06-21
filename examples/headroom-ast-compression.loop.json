@@ -1,0 +1,80 @@
+{
+  "name": "track-and-improve-headroom-ast",
+  "goal": {
+    "end_state": "Headroom AST compression keeps invalid syntax rejections at or below 10% on the representative corpus",
+    "evidence": "python -m pytest tests/test_transforms/test_code_compressor_corpus.py exits 0",
+    "constraints": [
+      "do not weaken the syntax verifier",
+      "do not delete existing compression safety fallbacks",
+      "new corpus tests must fail if invalid syntax is emitted"
+    ],
+    "budget": "at most 30 minutes per run"
+  },
+  "scope": {
+    "may_touch": [
+      "headroom/transforms/code_compressor.py",
+      "tests/test_transforms/",
+      "tests/fixtures/code_compression_corpus/",
+      "state/headroom-ast-compression-progress.jsonl"
+    ],
+    "must_not_touch": [
+      "pyproject.toml dependency pins",
+      "crates/",
+      "release configuration",
+      "production credentials"
+    ]
+  },
+  "loop_shape": "completion",
+  "trigger": {
+    "type": "manual",
+    "detail": "weekly or before compression-related PRs",
+    "unattended": false
+  },
+  "iteration": [
+    "load durable context and progress from disk",
+    "choose the single highest-impact open item",
+    "make the smallest change; on retry, change approach",
+    "run the verifier and write progress back to disk"
+  ],
+  "verifier": {
+    "rung": "tool",
+    "check": "corpus compression check exits 0 AND invalid_syntax_rejection_rate <= 0.10",
+    "independent": true,
+    "end_to_end": true
+  },
+  "state": {
+    "architecture": "fresh_restart",
+    "on_disk": true,
+    "durable_progress": [
+      "state/progress.jsonl"
+    ]
+  },
+  "stop_conditions": {
+    "success": "corpus compression check exits 0 AND invalid_syntax_rejection_rate <= 0.10",
+    "max_iterations": 4,
+    "budget": {
+      "max_runtime_seconds": 1800
+    },
+    "no_progress": {
+      "signal": "same invalid syntax failure signature",
+      "repeats": 2
+    }
+  },
+  "on_stop": "summarize changes and open gaps; do not claim success unless the verifier passed",
+  "report": {
+    "destination": "draft PR or local report"
+  },
+  "maker": {
+    "model": "cheap",
+    "effort": "low"
+  },
+  "autonomy": {
+    "requested": "L2",
+    "output_reversibility": "reversible",
+    "proven_manual_pass": false
+  },
+  "economics": {
+    "billing": "prepaid",
+    "proven_cheap": false
+  }
+}

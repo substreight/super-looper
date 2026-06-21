@@ -1,0 +1,28 @@
+{
+  "name": "headroom-ast-compression",
+  "repo": "https://github.com/chopratejas/headroom",
+  "issue": "https://github.com/chopratejas/headroom/issues/1233",
+  "answers": "../../examples/headroom-ast-compression.answers.json",
+  "loop_spec": "../../examples/headroom-ast-compression.loop.json",
+  "verifier": [
+    "python -m pytest tests/test_transforms/test_code_compressor_corpus.py"
+  ],
+  "may_touch": [
+    "headroom/transforms/code_compressor.py",
+    "tests/test_transforms/",
+    "tests/fixtures/code_compression_corpus/",
+    "state/headroom-ast-compression-progress.jsonl"
+  ],
+  "must_not_touch": [
+    "pyproject.toml",
+    "uv.lock",
+    "crates/",
+    ".github/workflows/",
+    "release configuration",
+    "production credentials"
+  ],
+  "budget": {
+    "max_runtime_seconds": 1800
+  },
+  "runs_dir": "runs"
+}

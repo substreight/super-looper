@@ -2,8 +2,13 @@
 """Tests for design_loop.py. Runs under pytest or standalone."""
 
 import copy
+import json
+import os
 
 import design_loop as d
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+EXAMPLES = os.path.join(HERE, "..", "examples")
 
 
 GOOD_ANSWERS = {
@@ -70,6 +75,16 @@ def test_proven_unattended_answers_build_l3_spec():
     spec, report = d.build_spec(_answers(unattended=True, proven_manual_pass=True, proven_cheap=True))
     assert report["validation"]["errors"] == [], report
     assert spec["autonomy"]["requested"] == "L3", spec["autonomy"]
+
+
+def test_headroom_case_study_builds_clean_l2_spec():
+    with open(os.path.join(EXAMPLES, "headroom-ast-compression.answers.json"), encoding="utf-8") as f:
+        answers = json.load(f)
+    spec, report = d.build_spec(answers)
+    assert report["verdict"] == "AUTONOMOUS_LOOP", report
+    assert report["validation"]["errors"] == [], report
+    assert report["validation"]["warnings"] == [], report
+    assert spec["autonomy"]["requested"] == "L2", spec["autonomy"]
 
 
 def _run_all():

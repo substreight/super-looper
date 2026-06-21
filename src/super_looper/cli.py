@@ -5,6 +5,15 @@ import json
 import sys
 
 from . import __version__
+from .case_study import (
+    CaseStudyError,
+    create_manifest,
+    design_case_study,
+    render_report,
+    run_case_study,
+    verify_run,
+    write_reports,
+)
 from .design import build_spec, command_questions, read_answers
 from .validate import max_autonomy, render, render_plain, validate
 
@@ -99,6 +108,71 @@ def cmd_max_autonomy(args):
     return 0
 
 
+def cmd_case_study_init(args):
+    try:
+        result = create_manifest(
+            args.out,
+            args.repo,
+            issue=args.issue,
+            name=args.name,
+            answers=args.answers,
+            verifier=args.verifier,
+            may_touch=args.may_touch,
+            must_not_touch=args.must_not_touch,
+            max_runtime_seconds=args.max_runtime_seconds,
+        )
+    except CaseStudyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_case_study_design(args):
+    try:
+        result = design_case_study(args.manifest)
+    except CaseStudyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    report = result.get("report", {})
+    return 1 if report.get("validation", {}).get("errors") else 0
+
+
+def cmd_case_study_run(args):
+    try:
+        result = run_case_study(
+            args.manifest,
+            args.repo_path,
+            run_id=args.run_id,
+            skip_verifier=args.skip_verifier,
+        )
+    except CaseStudyError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    summary = result.get("summary", {})
+    if args.strict and not summary.get("ready_for_pr_claim"):
+        return 1
+    return 0
+
+
+def cmd_case_study_verify(args):
+    result = verify_run(args.run_dir)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("passed") else 1
+
+
+def cmd_case_study_report(args):
+    if args.print_report:
+        print(render_report(args.run_dir, args.for_audience))
+        return 0
+    audience = "all" if args.for_audience == "all" else args.for_audience
+    outputs = write_reports(args.run_dir, audience)
+    print(json.dumps(outputs, indent=2))
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="super-looper", description="Design and validate agentic loop specs.")
     parser.add_argument("--version", action="version", version=f"super-looper {__version__}")
@@ -132,6 +206,43 @@ def build_parser():
     autonomy.add_argument("spec")
     autonomy.add_argument("--json", action="store_true", help="print structured JSON")
     autonomy.set_defaults(func=cmd_max_autonomy)
+
+    case = sub.add_parser("case-study", help="create, run, and report real-repo loop case studies")
+    case_sub = case.add_subparsers(dest="case_command", required=True)
+
+    case_init = case_sub.add_parser("init", help="create a case-study manifest directory")
+    case_init.add_argument("--repo", required=True, help="target repository URL or name")
+    case_init.add_argument("--out", required=True, help="directory to create")
+    case_init.add_argument("--issue", help="issue URL or identifier")
+    case_init.add_argument("--name", help="case-study name")
+    case_init.add_argument("--answers", help="existing answers JSON to copy into the case study")
+    case_init.add_argument("--verifier", action="append", default=[], help="verifier command; repeat for multiple")
+    case_init.add_argument("--may-touch", action="append", default=[], help="allowed path or comma list; repeatable")
+    case_init.add_argument("--must-not-touch", action="append", default=[], help="forbidden path or comma list; repeatable")
+    case_init.add_argument("--max-runtime-seconds", type=int, default=1800, help="overall verifier runtime budget")
+    case_init.set_defaults(func=cmd_case_study_init)
+
+    case_design = case_sub.add_parser("design", help="compile answers into a loop spec and design report")
+    case_design.add_argument("manifest", help="case-study manifest path or directory")
+    case_design.set_defaults(func=cmd_case_study_design)
+
+    case_run = case_sub.add_parser("run", help="run verifier commands and write reproducible artifacts")
+    case_run.add_argument("manifest", help="case-study manifest path or directory")
+    case_run.add_argument("--repo-path", required=True, help="local checkout of the target repository")
+    case_run.add_argument("--run-id", help="stable run directory name; defaults to UTC timestamp")
+    case_run.add_argument("--skip-verifier", action="store_true", help="write repo/scope artifacts without running verifier")
+    case_run.add_argument("--strict", action="store_true", help="exit nonzero unless verifier and scope both pass")
+    case_run.set_defaults(func=cmd_case_study_run)
+
+    case_verify = case_sub.add_parser("verify", help="check a run directory for reportable success")
+    case_verify.add_argument("run_dir", help="case-study run directory")
+    case_verify.set_defaults(func=cmd_case_study_verify)
+
+    case_report = case_sub.add_parser("report", help="render maintainer or PR markdown from a run directory")
+    case_report.add_argument("run_dir", help="case-study run directory")
+    case_report.add_argument("--for", dest="for_audience", choices=["maintainer", "pr", "all"], default="maintainer")
+    case_report.add_argument("--print", dest="print_report", action="store_true", help="print report markdown instead of writing files")
+    case_report.set_defaults(func=cmd_case_study_report)
 
     return parser
 

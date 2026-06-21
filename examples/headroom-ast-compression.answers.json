@@ -1,0 +1,41 @@
+{
+  "task": "Track and improve Headroom AST code-compression validity on modern Python files",
+  "recurs": true,
+  "cadence": "weekly or before compression-related PRs",
+  "wrong_result_signal": "the corpus compression check reports invalid syntax rejections above the accepted threshold",
+  "gate_check": "corpus compression check exits 0 AND invalid_syntax_rejection_rate <= 0.10",
+  "finished_state": "Headroom AST compression keeps invalid syntax rejections at or below 10% on the representative corpus",
+  "evidence": "python -m pytest tests/test_transforms/test_code_compressor_corpus.py exits 0",
+  "may_touch": [
+    "headroom/transforms/code_compressor.py",
+    "tests/test_transforms/",
+    "tests/fixtures/code_compression_corpus/",
+    "state/headroom-ast-compression-progress.jsonl"
+  ],
+  "must_not_touch": [
+    "pyproject.toml dependency pins",
+    "crates/",
+    "release configuration",
+    "production credentials"
+  ],
+  "constraints": [
+    "do not weaken the syntax verifier",
+    "do not delete existing compression safety fallbacks",
+    "new corpus tests must fail if invalid syntax is emitted"
+  ],
+  "budget": {
+    "max_runtime_seconds": 1800
+  },
+  "budget_summary": "at most 30 minutes per run",
+  "unattended": false,
+  "output_reversibility": "reversible",
+  "gate_rung": "tool",
+  "end_to_end": true,
+  "max_iterations": 4,
+  "no_progress_signal": "same invalid syntax failure signature",
+  "no_progress_repeats": 2,
+  "report_destination": "draft PR or local report",
+  "billing": "prepaid",
+  "proven_manual_pass": false,
+  "proven_cheap": false
+}
