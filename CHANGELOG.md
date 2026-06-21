@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-06-21
+Unknown-safe compiler + stricter autonomy enforcement.
+
+- **Unknown answers become `DISCOVERY_REQUIRED`:** the skill now treats "I don't know" as L0 evidence-gathering work, not a reason to guess. Added `scripts/design_loop.py`, a zero-dependency interview/spec compiler that emits a discovery plan when critical answers are missing and writes a draft JSON spec only when the facts are concrete enough.
+- **No false L3:** `max_autonomy(spec)` now requires L2 specs to have a real automatic gate, `scope.must_not_touch`, and `stop_conditions.budget`; L3 additionally requires an unattended trigger, end-to-end rung-1 tool gate, explicit reversible output, and `autonomy.proven_manual_pass: true`.
+- **Manual proof separated from cost proof:** `autonomy.proven_manual_pass` is now a schema field, separate from `economics.proven_cheap`.
+- **Zero-dependency fallback hardened:** the built-in structural checker now validates the scalar and container types that semantic lint relies on, preventing malformed specs from crashing fallback validation.
+- **Tests/examples:** added interview answer fixtures and standalone tests for the compiler and autonomy bypass regressions.
+
 ## 0.2.0 — 2026-06-21
 Autonomy dial + friendliness on-ramps.
 

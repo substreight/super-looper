@@ -226,6 +226,10 @@
           "type": "string",
           "enum": ["reversible", "outward_facing", "irreversible"],
           "description": "reversible = a PR/draft/revertable change; outward_facing = posts/sends/publishes; irreversible = prod write, payment, deletion. Anything but 'reversible' caps autonomy below L3."
+        },
+        "proven_manual_pass": {
+          "type": "boolean",
+          "description": "True only after at least one watched/manual run has completed successfully with the intended gate. Required for L3; separate from economics.proven_cheap."
         }
       }
     },

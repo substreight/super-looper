@@ -1,10 +1,10 @@
 {
   "recorded": "2026-06-21",
-  "skill_state": "v0.2.0 — after the autonomy dial (L0–L3, validator-enforced ceiling) and the friendliness on-ramps (guided interview, plain-language preview, dry-run, helpful refusals)",
+  "skill_state": "v0.3.0 — after unknown-safe discovery verdicts, stricter autonomy enforcement, and the deterministic interview/spec compiler",
   "harness": "fresh blind subagents (Claude Sonnet), one per scenario, verdicts as in results.example.jsonl",
-  "scenarios": 9,
-  "passed": 9,
+  "scenarios": 10,
+  "passed": 10,
   "accuracy": 1.0,
   "min_required": 0.8,
-  "notes": "Re-baselined for v0.2.0. New scenario 'unattended-no-gate' tests the autonomy-dial refusal. One deliberate change: 'ts-client' now also accepts USE_SCHEDULER — a blind run reached it via the skill's strip-the-LLM cron test, which is a sound reading (deterministic codegen → scheduler; agent-repairs-breakage → loop). Not a lowered bar: both verdicts are defensible. Re-run via EVAL.md after any edit; accuracy must hold and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8` -> 9/9."
+  "notes": "Re-baselined for v0.3.0. New scenario 'unknown-interview' tests that missing critical interview answers produce DISCOVERY_REQUIRED and L0 discovery work instead of guessed specs. 'ts-client' still accepts USE_SCHEDULER because deterministic codegen plus tsc can be soundly read as a scheduled job unless agent repair is required. Re-run via EVAL.md after any edit; accuracy must hold and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8` -> 10/10."
 }

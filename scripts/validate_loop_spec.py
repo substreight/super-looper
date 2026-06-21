@@ -89,16 +89,18 @@ def max_autonomy(spec):
     """Compute the highest autonomy level a loop has EARNED, plus what's missing to go higher.
 
     Returns (level, missing): level in L0..L3, missing = the gaps blocking the next level.
-    Autonomy is earned, never chosen: the ceiling is set by the gate rung, then capped by
-    the budget cap, scope fence, output reversibility, and a proven manual pass. Pure; reads
-    the same fields the semantic checks read.
+    Autonomy is earned, never chosen. L2 needs a real automatic gate plus a budget
+    cap and scope fence. L3 additionally needs an unattended trigger, a rung-1
+    end-to-end tool gate, explicit reversible output, and a proven manual pass.
+    Pure; reads the same fields the semantic checks read.
     """
     spec = _d(spec)
     verifier = _d(spec.get("verifier"))
     scope = _d(spec.get("scope"))
     sc = _d(spec.get("stop_conditions"))
-    economics = _d(spec.get("economics"))
-    reversibility = _d(spec.get("autonomy")).get("output_reversibility")
+    trigger = _d(spec.get("trigger"))
+    autonomy = _d(spec.get("autonomy"))
+    reversibility = autonomy.get("output_reversibility")
     rung = verifier.get("rung")
 
     # The gate rung sets the hard ceiling.
@@ -107,19 +109,33 @@ def max_autonomy(spec):
     if rung == "human":
         return "L1", ["an automatic gate (a human gate is human-in-the-loop by definition)"]
 
-    # rung is 'tool' or 'independent_model': L2 is reachable; L3 needs every guardrail.
-    missing = []
-    if rung != "tool":
-        missing.append("a rung-1 tool gate on the deliverable (independent_model tops out at L2)")
+    # rung is 'tool' or 'independent_model': L2 is reachable only with guardrails.
+    l2_missing = []
     if not sc.get("budget"):
-        missing.append("a budget cap (stop_conditions.budget)")
+        l2_missing.append("a budget cap (stop_conditions.budget)")
     if not scope.get("must_not_touch"):
-        missing.append("a blast-radius fence (scope.must_not_touch)")
-    if reversibility not in (None, "reversible"):
-        missing.append(f"reversible output (it's {reversibility} — a human must own the irreversible step)")
-    if not economics.get("proven_cheap"):
-        missing.append("a proven manual pass (economics.proven_cheap)")
-    return ("L3", []) if not missing else ("L2", missing)
+        l2_missing.append("a blast-radius fence (scope.must_not_touch)")
+    if l2_missing:
+        return "L1", l2_missing
+
+    # L2 is the ceiling for independent model gates.
+    if rung != "tool":
+        return "L2", ["a rung-1 tool gate on the deliverable (independent_model tops out at L2)"]
+
+    # L3 needs every unattended guardrail, explicitly stated.
+    l3_missing = []
+    if trigger.get("type") is None or trigger.get("unattended") is not True:
+        l3_missing.append("an explicit unattended trigger (trigger.type plus trigger.unattended=true)")
+    if verifier.get("end_to_end") is not True:
+        l3_missing.append("an end-to-end tool gate on the real deliverable (verifier.end_to_end=true)")
+    if reversibility != "reversible":
+        if reversibility is None:
+            l3_missing.append("explicit reversible output (autonomy.output_reversibility='reversible')")
+        else:
+            l3_missing.append(f"reversible output (it's {reversibility} — a human must own the irreversible step)")
+    if autonomy.get("proven_manual_pass") is not True:
+        l3_missing.append("a proven manual pass (autonomy.proven_manual_pass=true)")
+    return ("L3", []) if not l3_missing else ("L2", l3_missing)
 
 
 ENUMS = {
@@ -129,49 +145,191 @@ ENUMS = {
     ("trigger", "type"): ["schedule", "event", "manual"],
     ("execution", "isolation"): ["none", "worktree", "sandbox"],
     ("economics", "billing"): ["prepaid", "metered", "unknown"],
+    ("autonomy", "requested"): ["L0", "L1", "L2", "L3"],
+    ("autonomy", "output_reversibility"): ["reversible", "outward_facing", "irreversible"],
 }
 
 
 # ---------- structural validation ----------
 
 def _builtin_structural(spec):
-    """Minimal structural check used when jsonschema isn't installed."""
+    """Structural check used when jsonschema isn't installed.
+
+    Keep this close to schemas/loop-spec.schema.json for the fields the semantic
+    lint relies on. It intentionally stays small, but it must catch bad shapes
+    and scalar types so validate() remains a safe harness gate with no deps.
+    """
     errors = []
+    if not isinstance(spec, dict):
+        return [f"spec must be a JSON object, got {type(spec).__name__}"]
+
     required_top = ["name", "goal", "scope", "loop_shape", "verifier", "state",
                     "stop_conditions", "on_stop"]
     for k in required_top:
         if k not in spec:
             errors.append(f"missing required field: {k}")
 
+    def kind(obj):
+        return type(obj).__name__
+
+    def obj_at(path):
+        obj = spec
+        for p in path:
+            obj = obj.get(p) if isinstance(obj, dict) else None
+        return obj
+
+    def expect_obj(path):
+        obj = obj_at(path)
+        if obj is not None and not isinstance(obj, dict):
+            errors.append(f"{'.'.join(path)} must be an object, got {kind(obj)}")
+        return obj if isinstance(obj, dict) else None
+
+    def expect_str(obj, path, required=False):
+        key = path[-1]
+        if not isinstance(obj, dict) or key not in obj:
+            if required:
+                errors.append(f"missing required field: {'.'.join(path)}")
+            return
+        val = obj.get(key)
+        if not isinstance(val, str) or val == "":
+            errors.append(f"{'.'.join(path)} must be a non-empty string")
+
+    def expect_bool(obj, path, required=False):
+        key = path[-1]
+        if not isinstance(obj, dict) or key not in obj:
+            if required:
+                errors.append(f"missing required field: {'.'.join(path)}")
+            return
+        if not isinstance(obj.get(key), bool):
+            errors.append(f"{'.'.join(path)} must be a boolean")
+
+    def expect_int(obj, path, required=False, minimum=None):
+        key = path[-1]
+        if not isinstance(obj, dict) or key not in obj:
+            if required:
+                errors.append(f"missing required field: {'.'.join(path)}")
+            return
+        val = obj.get(key)
+        if not isinstance(val, int) or isinstance(val, bool):
+            errors.append(f"{'.'.join(path)} must be an integer")
+            return
+        if minimum is not None and val < minimum:
+            errors.append(f"{'.'.join(path)} must be >= {minimum}")
+
+    def expect_list(obj, path, required=False, min_items=0):
+        key = path[-1]
+        if not isinstance(obj, dict) or key not in obj:
+            if required:
+                errors.append(f"missing required field: {'.'.join(path)}")
+            return
+        val = obj.get(key)
+        if not isinstance(val, list):
+            errors.append(f"{'.'.join(path)} must be an array")
+            return
+        if len(val) < min_items:
+            errors.append(f"{'.'.join(path)} must contain at least {min_items} item(s)")
+        for i, item in enumerate(val):
+            if not isinstance(item, str):
+                errors.append(f"{'.'.join(path)}[{i}] must be a string")
+
     def req(obj, path, keys):
         for k in keys:
             if not isinstance(obj, dict) or k not in obj or obj.get(k) in (None, "", [], {}):
                 errors.append(f"missing/empty required field: {path}.{k}")
 
-    if isinstance(spec.get("goal"), dict):
-        req(spec["goal"], "goal", ["end_state", "evidence", "budget"])
-        if "constraints" not in spec["goal"]:
+    for top in ("goal", "scope", "verifier", "state", "stop_conditions"):
+        expect_obj((top,))
+
+    expect_str(spec, ("name",), required="name" in spec)
+    expect_str(spec, ("loop_shape",), required="loop_shape" in spec)
+    expect_str(spec, ("on_stop",), required="on_stop" in spec)
+
+    goal = expect_obj(("goal",))
+    if goal is not None:
+        req(goal, "goal", ["end_state", "evidence", "budget"])
+        expect_str(goal, ("goal", "end_state"), required=True)
+        expect_str(goal, ("goal", "evidence"), required=True)
+        expect_str(goal, ("goal", "budget"), required=True)
+        if "constraints" not in goal:
             errors.append("missing required field: goal.constraints (use [] if none, deliberately)")
-    if isinstance(spec.get("scope"), dict):
-        if not spec["scope"].get("may_touch"):
+        else:
+            expect_list(goal, ("goal", "constraints"))
+
+    scope = expect_obj(("scope",))
+    if scope is not None:
+        if not scope.get("may_touch"):
             errors.append("missing/empty required field: scope.may_touch")
-    if isinstance(spec.get("verifier"), dict):
-        req(spec["verifier"], "verifier", ["rung", "check"])
-    if isinstance(spec.get("state"), dict):
-        if "on_disk" not in spec["state"]:
+        expect_list(scope, ("scope", "may_touch"), required=True, min_items=1)
+        expect_list(scope, ("scope", "must_not_touch"))
+
+    verifier = expect_obj(("verifier",))
+    if verifier is not None:
+        req(verifier, "verifier", ["rung", "check"])
+        expect_str(verifier, ("verifier", "rung"), required=True)
+        expect_str(verifier, ("verifier", "check"), required=True)
+        expect_bool(verifier, ("verifier", "independent"))
+        expect_bool(verifier, ("verifier", "end_to_end"))
+
+    state = expect_obj(("state",))
+    if state is not None:
+        if "on_disk" not in state:
             errors.append("missing required field: state.on_disk")
-        if "architecture" not in spec["state"]:
+        if "architecture" not in state:
             errors.append("missing required field: state.architecture")
-    sc = spec.get("stop_conditions")
-    if isinstance(sc, dict):
+        expect_str(state, ("state", "architecture"), required="architecture" in state)
+        expect_bool(state, ("state", "on_disk"), required="on_disk" in state)
+        expect_list(state, ("state", "durable_context"))
+        expect_list(state, ("state", "durable_progress"))
+
+    sc = expect_obj(("stop_conditions",))
+    if sc is not None:
         # success is the finish line of a completion loop; cadence loops run open-ended.
         required_sc = ["success", "max_iterations"] if spec.get("loop_shape") == "completion" \
             else ["max_iterations"]
         req(sc, "stop_conditions", required_sc)
+        expect_str(sc, ("stop_conditions", "success"), required="success" in required_sc)
+        expect_int(sc, ("stop_conditions", "max_iterations"), required=True, minimum=1)
         if not isinstance(sc.get("no_progress"), dict):
             errors.append("missing required field: stop_conditions.no_progress")
         else:
             req(sc["no_progress"], "stop_conditions.no_progress", ["signal", "repeats"])
+            expect_str(sc["no_progress"], ("stop_conditions", "no_progress", "signal"), required=True)
+            expect_int(sc["no_progress"], ("stop_conditions", "no_progress", "repeats"),
+                       required=True, minimum=2)
+        if "budget" in sc:
+            budget = sc.get("budget")
+            if not isinstance(budget, dict) or not budget:
+                errors.append("stop_conditions.budget must be a non-empty object")
+            else:
+                for key in ("max_tokens", "max_runtime_seconds"):
+                    if key in budget:
+                        expect_int(budget, ("stop_conditions", "budget", key), minimum=1)
+                if "max_cost_usd" in budget:
+                    val = budget.get("max_cost_usd")
+                    if not isinstance(val, (int, float)) or isinstance(val, bool) or val < 0:
+                        errors.append("stop_conditions.budget.max_cost_usd must be a number >= 0")
+
+    trigger = expect_obj(("trigger",))
+    if trigger is not None:
+        expect_str(trigger, ("trigger", "type"), required=True)
+        expect_str(trigger, ("trigger", "detail"))
+        expect_bool(trigger, ("trigger", "unattended"))
+
+    execution = expect_obj(("execution",))
+    if execution is not None:
+        expect_int(execution, ("execution", "parallelism"), minimum=1)
+        expect_str(execution, ("execution", "isolation"))
+
+    economics = expect_obj(("economics",))
+    if economics is not None:
+        expect_str(economics, ("economics", "billing"))
+        expect_bool(economics, ("economics", "proven_cheap"))
+
+    autonomy = expect_obj(("autonomy",))
+    if autonomy is not None:
+        expect_str(autonomy, ("autonomy", "requested"))
+        expect_str(autonomy, ("autonomy", "output_reversibility"))
+        expect_bool(autonomy, ("autonomy", "proven_manual_pass"))
 
     # enum checks
     for path, allowed in ENUMS.items():
@@ -255,7 +413,10 @@ def _semantic(spec):
                         "Prefer a different model/family for the gate.")
 
     # Concurrency without isolation -> parallel clobber.
-    if execution.get("parallelism", 1) and execution.get("parallelism", 1) > 1:
+    parallelism = execution.get("parallelism", 1)
+    if not isinstance(parallelism, int) or isinstance(parallelism, bool):
+        parallelism = 1
+    if parallelism > 1:
         if execution.get("isolation", "none") == "none":
             errors.append("execution.parallelism > 1 with isolation 'none': concurrent agents will overwrite "
                           "each other. Use a git worktree or sandbox per agent.")

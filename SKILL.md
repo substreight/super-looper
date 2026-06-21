@@ -44,6 +44,14 @@ Miss one → say so plainly and recommend the alternative: a one-shot prompt, an
 
 Question 2 decides everything: if nothing can fail the work automatically, route them to a one-shot, a scheduled job, or a human-gated draft — don't build a loop.
 
+**If the human literally cannot answer, do not guess.** Return `DISCOVERY_REQUIRED` and keep autonomy at **L0**. Unknown answers are evidence-gathering work, not missing form fields. Give a short discovery plan: run one watched manual attempt, capture one bad output, name the smallest check that would reject it, define `may_touch` / `must_not_touch`, and set a machine-readable budget cap. Only resume loop design after those facts exist. The deterministic helper is:
+
+```
+python scripts/design_loop.py questions
+python scripts/design_loop.py interview --answers examples/unknown-gate.answers.json
+python scripts/design_loop.py interview --answers examples/ts-client.answers.json --out draft.loop.json
+```
+
 ## The anatomy of a clean loop
 
 Five parts. Name each one explicitly; a loop missing any of them fails in a predictable way (see `references/failure-modes.md`).
@@ -106,7 +114,7 @@ REPORT:      <where the result/summary goes>
 MAKER:       <model/effort>   CHECKER: <model/effort, if separate>
 ```
 
-`references/loop-spec-templates.md` has three filled templates: a rigorous code/CI loop, a portable "paste into any chat model" self-checking loop (no tooling, with its honest limits), and a lightweight scheduled/ops automation. Read it before writing a spec.
+`references/loop-spec-templates.md` has filled templates: a rigorous code/CI loop, a portable "paste into any chat model" self-checking loop (no tooling, with its honest limits), lightweight scheduled/ops automation, and gate-hardening patterns. Read it before writing a spec.
 
 ## Machine-checkable spec (JSON) — keep both forms
 
@@ -119,9 +127,10 @@ python scripts/validate_loop_spec.py my-loop.json            # validate (exit 1 
 python scripts/validate_loop_spec.py my-loop.json --render    # print the human-readable spec
 python scripts/validate_loop_spec.py my-loop.json --explain   # one-sentence plain-language preview
 python scripts/validate_loop_spec.py my-loop.json --strict    # treat warnings as errors
+python scripts/design_loop.py interview --answers answers.json --out my-loop.json
 ```
 
-Structural rules (required fields, enums) live in the schema; the validator adds the judgment the schema can't express and will **error** on: a `self` verifier rung (maker grading itself is off the ladder), `state.on_disk: false` (context-accumulation anti-pattern), an unattended loop with no trustworthy gate, an unattended loop with no budget cap, parallelism > 1 with no isolation, and an `autonomy.requested` level higher than the loop has earned (it computes the ceiling via `max_autonomy(spec)` and names what's missing). It **warns** on a same-model checker, an unattended metered loop that isn't proven cheap, a missing budget cap on an attended loop, a gate phrased as a taste judgment or with no machine-decidable signal, a single-pass loop (`max_iterations: 1`) that never iterates and is likely a scheduled one-shot, and spec parts that don't refer to each other (evidence ↔ verifier, success ↔ end_state). The validator is dependency-free (uses the `jsonschema` library if installed, falls back to a built-in checker — a missing or misplaced schema file degrades to the built-in rather than crashing) and importable, so a harness can call `validate(spec)` before each run. A worked instance is in `examples/nightly-export.loop.json`.
+Structural rules (required fields, enums) live in the schema; the validator adds the judgment the schema can't express and will **error** on: a `self` verifier rung (maker grading itself is off the ladder), `state.on_disk: false` (context-accumulation anti-pattern), an unattended loop with no trustworthy gate, an unattended loop with no budget cap, L2 requested without both a budget cap and scope fence, L3 requested without an unattended trigger, end-to-end rung-1 tool gate, explicit reversible output, or `autonomy.proven_manual_pass: true`, parallelism > 1 with no isolation, and an `autonomy.requested` level higher than the loop has earned (it computes the ceiling via `max_autonomy(spec)` and names what's missing). It **warns** on a same-model checker, an unattended metered loop that isn't proven cheap, a missing budget cap on an attended loop, a gate phrased as a taste judgment or with no machine-decidable signal, a single-pass loop (`max_iterations: 1`) that never iterates and is likely a scheduled one-shot, and spec parts that don't refer to each other (evidence ↔ verifier, success ↔ end_state). The validator is dependency-free (uses the `jsonschema` library if installed, falls back to a built-in checker — a missing or misplaced schema file degrades to the built-in rather than crashing) and importable, so a harness can call `validate(spec)` before each run. A worked instance is in `examples/nightly-export.loop.json`.
 
 When emitting JSON, fill the four `goal` parts (end_state, evidence, constraints, budget) deliberately — they are the contract, and the validator treats vague/empty ones as errors. One honest limit: the validator can flag a gate that's absent, self-graded, or phrased as taste — it **cannot** confirm that a gate which *exists* actually separates good output from bad. That's a property of how the gate behaves on real inputs, not of the spec text; only running the gate (or tracking accept-rate over real runs) closes that gap. Designing a discriminating gate stays your job.
 
@@ -143,15 +152,17 @@ Autonomy is not a switch the user flips; it's a dial whose **ceiling the loop ha
 |---|---|---|
 | **L0 · advise / dry-run** | designs it, previews the plan + cost + blast radius, runs nothing | always |
 | **L1 · propose & confirm** | does the work, stops at each human decision point (above) | always |
-| **L2 · act with guardrails** | runs end-to-end, pauses only at the non-negotiables (irreversible/outward action · budget breach · no-progress) | a real gate (rung 1–2) + scope fence + budget |
-| **L3 · unattended** | runs on a trigger, no human in the loop, reports after | rung-1 tool gate on the deliverable + scope `must_not_touch` + budget cap + reversible output + a proven manual pass |
+| **L2 · act with guardrails** | runs end-to-end, pauses only at the non-negotiables (irreversible/outward action · budget breach · no-progress) | a real automatic gate (rung 1–2) + `scope.must_not_touch` + `stop_conditions.budget` |
+| **L3 · unattended** | runs on a trigger, no human in the loop, reports after | rung-1 end-to-end tool gate on the deliverable + unattended trigger + `scope.must_not_touch` + `stop_conditions.budget` + `autonomy.output_reversibility: reversible` + `autonomy.proven_manual_pass: true` |
 
 The ceiling is the **lowest** cap implied by these axes:
 - **Gate rung** — `self`/none → L1 (can't run unsupervised without a real gate); `human` → L1 (a human gate *is* human-in-the-loop); `independent_model` → L2; `tool` → up to L3.
-- **Budget** — no cap → max L2 (an unattended loop with no budget is the overnight-runaway-bill failure mode).
-- **Scope** — no `must_not_touch` fence → max L2 (nothing bounds the blast radius).
-- **Reversibility** — output that's outward-facing or irreversible → max L2 (a human owns the irreversible step). A PR you review is reversible; a posted message or a prod write is not.
-- **Proven** — not yet proven by ≥1 manual pass → max L2 (autonomy is *earned by demonstration*, not asserted — see Build order).
+- **Budget** — no machine-enforced cap → max L1. A human-readable budget summary is not enough.
+- **Scope** — no `must_not_touch` fence → max L1. Nothing bounds the blast radius.
+- **Trigger** — no explicit unattended trigger → max L2. L3 means it actually runs without a human present.
+- **End-to-end** — a tool gate that does not exercise the real deliverable → max L2 for unattended use.
+- **Reversibility** — missing or outward-facing / irreversible output → max L2. A PR you review is reversible; a posted message or a prod write is not.
+- **Proven** — no `autonomy.proven_manual_pass: true` after ≥1 watched run → max L2. This is separate from `economics.proven_cheap`; cheap is not proven.
 
 This is why a rung-1, PR-emitting loop can go L3 while a "post a first reply to every issue" loop (fuzzy gate, outward-facing) can't. The validator computes this — `max_autonomy(spec)` — and **errors if `autonomy.requested` exceeds what's earned**, listing what to add. When a user asks for more autonomy than the loop has earned, don't argue — name the missing piece ("make the gate rung-1, or keep a human at the publish step, and L3 unlocks"). That refusal *is* the product.
 
@@ -159,7 +170,7 @@ This is why a rung-1, PR-emitting loop can go L3 while a "post a first reply to 
 
 When you surface candidate loops, **every candidate gets the same structure** — even the ones you'll recommend against — so they're comparable and none is silently shortchanged. A thin proposal reads as "already decided," which steals the human's choice; **uniformity is not optional, brevity is fine.** Per candidate:
 
-- **Verdict** — autonomous loop / scheduler / human-in-the-loop / not-a-loop / reject-design
+- **Verdict** — autonomous loop / discovery-required / scheduler / human-in-the-loop / not-a-loop / reject-design
 - **Qualify (Step 0)** — the five checks + the gate-covers-the-deliverable test, each pass/fail
 - **Gate** — the concrete check and its ladder rung
 - **Shape & trigger** — completion vs cadence; what fires it

@@ -42,5 +42,10 @@
   "on_stop": "if still failing, page on-call with the exact validation error; do NOT mark the run successful",
   "report": {"destination": "success -> log; failure -> page on-call"},
   "maker": {"model": "cheap", "effort": "low"},
+  "autonomy": {
+    "requested": "L3",
+    "output_reversibility": "reversible",
+    "proven_manual_pass": true
+  },
   "economics": {"billing": "prepaid", "proven_cheap": true}
 }

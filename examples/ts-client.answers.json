@@ -1,0 +1,17 @@
+{
+  "task": "Regenerate the TypeScript API client and keep it compiling",
+  "recurs": true,
+  "cadence": "daily 02:00",
+  "wrong_result_signal": "tsc exits nonzero OR generated client diff is empty",
+  "gate_check": "tsc exits 0 AND generated client diff is non-empty",
+  "finished_state": "generated client compiles and tsc exits 0",
+  "evidence": "tsc exits 0",
+  "may_touch": ["src/generated/", "state/progress.jsonl"],
+  "must_not_touch": ["src/handwritten/", "production credentials"],
+  "budget": {"max_runtime_seconds": 1200},
+  "unattended": false,
+  "output_reversibility": "reversible",
+  "gate_rung": "tool",
+  "end_to_end": true,
+  "billing": "prepaid"
+}

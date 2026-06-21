@@ -19,7 +19,7 @@
 
 The unglamorous pitch: most "autonomous loop" ideas are net-negative — they spin, drift, or quietly bill you to ship confidently-wrong work *faster*. So super-looper's first job is to say **no**. Its second is to make the rare loop that *is* worth building actually converge — by forcing you to design the gate before the machinery, keep state out of the context window, and never let the thing being judged grade itself. It enforces the non-negotiables with a machine-checkable spec + a **zero-dependency validator**, and ships with **its own eval suite** so the skill can't silently regress.
 
-It insists on two more things. Autonomy is **earned, not toggled** — a loop runs only as unattended as its gate, scope, budget, and a proven run allow, and the validator refuses anything more. And you shouldn't have to read the skill to use it: a six-question interview derives the verdict and the spec, and `--explain` previews any loop in one plain sentence.
+It insists on two more things. Autonomy is **earned, not toggled** — a loop runs only as unattended as its gate, scope, budget, reversibility, and proven manual pass allow, and the validator refuses anything more. And you shouldn't have to read the skill to use it: a six-question interview derives the verdict and the spec, `DISCOVERY_REQUIRED` handles unknown answers without guessing, and `--explain` previews any loop in one plain sentence.
 
 ## The one idea
 An agentic loop runs DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE on its own, until an objective gate passes or a hard limit trips — no human pushing each step. The part that makes it a loop and not a model talking to itself is **VERIFY**: a check, ideally outside the model, that can actually *fail* the work.
@@ -31,12 +31,20 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 |---|---|
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
-| `schemas/` + `scripts/` | JSON spec schema + a dependency-free validator (`validate(spec) -> errors, warnings`) · 30 tests |
-| `examples/` | a worked, valid loop spec |
-| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (9/9 baseline) |
+| `schemas/` + `scripts/` | JSON spec schema + dependency-free validator + interview/spec compiler · 44 tests |
+| `examples/` | a worked, valid loop spec + interview answer fixtures |
+| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
 
 ## Quickstart
 **Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision. Haven't read the skill? Just describe your task — it runs a six-question interview (does it recur? what would automatically prove a result wrong? what must it never touch?) and derives the rest.
+
+**Compile interview answers:**
+```
+python scripts/design_loop.py questions
+python scripts/design_loop.py interview --answers examples/unknown-gate.answers.json
+python scripts/design_loop.py interview --answers examples/ts-client.answers.json --out draft.loop.json
+```
+If the human can't answer a critical question, the compiler returns `DISCOVERY_REQUIRED` and an L0 discovery plan instead of inventing a loop.
 
 **Validate & preview a spec:**
 ```
@@ -47,7 +55,7 @@ Zero deps — uses `jsonschema` if installed, falls back to a built-in checker.
 
 **Gate the skill itself** (run after any edit to it):
 ```
-cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 9/9
+cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 10/10
 ```
 
 ## The five-part anatomy
@@ -62,8 +70,8 @@ A loop runs only as unattended as it has *earned*. The validator computes the ce
 
 - **L0 · advise** — designs and previews, runs nothing
 - **L1 · propose & confirm** — does the work, stops at each decision point
-- **L2 · act with guardrails** — runs end-to-end, pauses only at irreversible / budget / no-progress
-- **L3 · unattended** — trigger, no human, reports after — *only* with a rung-1 gate on the deliverable, a scope fence, a budget cap, reversible output, and a proven manual pass
+- **L2 · act with guardrails** — real automatic gate + scope fence + machine budget cap
+- **L3 · unattended** — trigger, no human, reports after — *only* with a rung-1 end-to-end gate on the deliverable, scope fence, budget cap, reversible output, and `autonomy.proven_manual_pass: true`
 
 ## Why trust any of this
 The load-bearing claims are sourced in [`references/evidence.md`](references/evidence.md): self-correction limits (Huang 2024), self-preference bias (Panickssery 2024), context rot (Liu/TACL 2024; Chroma & NoLiMa 2025), and verifiable rewards (Tulu 3; DeepSeek-R1). The named techniques ("Ralph," evaluator-optimizer, harnesses) are mostly blog-evidenced — so design from the principles, not the hype.

@@ -1,0 +1,11 @@
+{
+  "task": "Have an agent improve onboarding emails until they are good",
+  "recurs": "unknown",
+  "wrong_result_signal": "unknown",
+  "finished_state": "good onboarding email",
+  "may_touch": [],
+  "must_not_touch": [],
+  "budget": "unknown",
+  "unattended": true,
+  "output_reversibility": "outward_facing"
+}

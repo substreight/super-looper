@@ -30,9 +30,9 @@ Whether a fresh agent, given only the skill and a request (blind to the answer),
 For reasoning *quality*, not just the verdict, have a **different model family** judge each result against the rubric — given the artifact and criteria but **not** the maker's justification (rung 2 from `state-and-verification.md`, applied to the skill itself).
 
 ## Baseline & example
-`results.example.jsonl` holds the verdicts a blind Sonnet agent produced for the 8 scenarios (after the gate-covers-deliverable fix). Reproduce the baseline:
+`results.example.jsonl` holds the current baseline verdicts. Reproduce the baseline:
 ```
-python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 8/8
+python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 10/10
 ```
 `baseline.json` records that run.
 

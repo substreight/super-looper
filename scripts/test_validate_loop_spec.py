@@ -69,6 +69,7 @@ def test_unattended_without_budget_errors():
 def test_attended_without_budget_warns_only():
     s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"),
               trigger={"type": "manual", "unattended": False})
+    s.pop("autonomy", None)
     errors, warnings = v.validate(s)
     assert not any("budget" in e for e in errors), errors
     assert any("budget" in w for w in warnings), warnings
@@ -246,7 +247,8 @@ def test_multi_pass_loop_does_not_warn_single_pass():
 # ---- autonomy dial ----
 
 def test_good_example_earns_l3():
-    # nightly-export has a tool gate + budget + must_not_touch + proven_cheap -> top level.
+    # nightly-export has a rung-1 end-to-end gate, trigger, budget, scope fence,
+    # reversible output, and a proven manual pass -> top level.
     level, missing = v.max_autonomy(GOOD)
     assert level == "L3", (level, missing)
     assert missing == [], missing
@@ -264,7 +266,7 @@ def test_independent_model_caps_at_l2():
 
 
 def test_request_within_ceiling_ok():
-    s = _spec(autonomy={"requested": "L3"})  # GOOD earns L3
+    s = _spec()  # GOOD requests and earns L3
     errors, _ = v.validate(s)
     assert not any("autonomy.requested" in e for e in errors), errors
 
@@ -276,9 +278,52 @@ def test_request_l3_without_gate_errors():
 
 
 def test_request_l3_without_budget_errors():
-    s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"), autonomy={"requested": "L3"})
+    s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"))
     errors, _ = v.validate(s)
-    assert any("only earned L2" in e and "budget cap" in e for e in errors), errors
+    assert any("only earned L1" in e and "budget cap" in e for e in errors), errors
+
+
+def test_request_l2_without_budget_errors():
+    s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"),
+              autonomy={"requested": "L2"})
+    errors, _ = v.validate(s)
+    assert any("only earned L1" in e and "budget cap" in e for e in errors), errors
+
+
+def test_request_l2_without_scope_fence_errors():
+    scope = copy.deepcopy(GOOD["scope"])
+    scope.pop("must_not_touch", None)
+    s = _spec(scope=scope, autonomy={"requested": "L2"})
+    errors, _ = v.validate(s)
+    assert any("only earned L1" in e and "blast-radius fence" in e for e in errors), errors
+
+
+def test_request_l3_without_trigger_errors():
+    s = _spec()
+    s.pop("trigger", None)
+    errors, _ = v.validate(s)
+    assert any("only earned L2" in e and "unattended trigger" in e for e in errors), errors
+
+
+def test_request_l3_without_reversibility_errors():
+    s = _spec(autonomy={"requested": "L3", "proven_manual_pass": True})
+    errors, _ = v.validate(s)
+    assert any("only earned L2" in e and "output_reversibility" in e for e in errors), errors
+
+
+def test_request_l3_without_manual_pass_errors_even_if_cheap():
+    s = _spec(autonomy={"requested": "L3", "output_reversibility": "reversible"},
+              economics={"billing": "prepaid", "proven_cheap": True})
+    errors, _ = v.validate(s)
+    assert any("only earned L2" in e and "proven_manual_pass" in e for e in errors), errors
+
+
+def test_request_l3_without_end_to_end_errors():
+    verifier = copy.deepcopy(GOOD["verifier"])
+    verifier.pop("end_to_end", None)
+    s = _spec(verifier=verifier)
+    errors, _ = v.validate(s)
+    assert any("only earned L2" in e and "end-to-end" in e for e in errors), errors
 
 
 def test_irreversible_output_caps_below_l3():
@@ -302,6 +347,12 @@ def test_autonomy_schema_field_is_optional_and_valid():
     # adding the autonomy block must not break structural validation
     errors, warnings = v.validate(_spec(autonomy={"requested": "L2", "output_reversibility": "reversible"}))
     assert errors == [], errors
+
+
+def test_builtin_structural_rejects_bad_parallelism_type():
+    s = _spec(execution={"parallelism": "2", "isolation": "none"})
+    errors = v._builtin_structural(s)
+    assert any("execution.parallelism" in e and "integer" in e for e in errors), errors
 
 
 def _run_all():
