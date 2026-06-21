@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loop-design/schemas/loop-spec.schema.json",
+  "title": "Loop Spec",
+  "description": "Machine-checkable specification of an agentic loop. Encodes the loop-design skill's non-negotiables: a four-part goal contract, a scope, a verifier with a named trust rung, on-disk state, and three stop conditions (success, hard cap, no-progress). Structural rules live here; judgment rules (e.g. self-grading is off the ladder) live in validate_loop_spec.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "goal", "scope", "loop_shape", "verifier", "state", "stop_conditions", "on_stop"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short identifier for the loop."
+    },
+    "goal": {
+      "type": "object",
+      "description": "The goal as a contract, not a prompt. All four parts must be explicit; a vague part gets filled with the easiest reading.",
+      "additionalProperties": false,
+      "required": ["end_state", "evidence", "constraints", "budget"],
+      "properties": {
+        "end_state": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The objective pass condition. Must be true/false checkable, e.g. 'tests in /auth pass'."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What proves the end state was reached, e.g. 'pytest exits 0'. Should map to the verifier."
+        },
+        "constraints": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "What the agent must not break getting there. May be empty array, but must be stated deliberately."
+        },
+        "budget": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human summary of the work it may spend (the machine-enforced version lives in stop_conditions)."
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["may_touch"],
+      "properties": {
+        "may_touch": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string"},
+          "description": "Paths/resources the loop may read or edit."
+        },
+        "must_not_touch": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Protected paths/resources. Prevents goal drift."
+        }
+      }
+    },
+    "loop_shape": {
+      "type": "string",
+      "enum": ["completion", "cadence"],
+      "description": "completion = run until a checkable end state is true (/goal-style). cadence = re-run on a schedule for open-ended work (/loop, cron; the PR-babysitter shape)."
+    },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {"type": "string", "enum": ["schedule", "event", "manual"]},
+        "detail": {"type": "string", "description": "e.g. 'every 15m', 'PR labeled agent-watch', 'on CI failure'."},
+        "unattended": {"type": "boolean", "description": "True if it runs without a human present. Raises the bar on verification."}
+      }
+    },
+    "iteration": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "The steps performed each pass (the EACH ITERATION list). First step typically loads state from disk; a retry step should change approach, not repeat."
+    },
+    "verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rung", "check"],
+      "properties": {
+        "rung": {
+          "type": "string",
+          "enum": ["tool", "independent_model", "human", "self"],
+          "description": "Verifier ladder rung. tool = computational gate (strongest). independent_model = different model judging the artifact. human = human gate (=> not autonomous). self = maker grades itself (OFF the ladder; flagged as error by the validator)."
+        },
+        "check": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The concrete gate, e.g. 'schema valid AND row_count > 0'."
+        },
+        "independent": {
+          "type": "boolean",
+          "description": "True if the checker is separate from the maker and not given the maker's justification."
+        },
+        "end_to_end": {
+          "type": "boolean",
+          "description": "True if the check exercises the real system (live endpoint, browser, simulator) rather than a self-reported unit result. Strongly recommended for unattended loops."
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["architecture", "on_disk"],
+      "properties": {
+        "architecture": {
+          "type": "string",
+          "enum": ["fresh_restart", "compaction"],
+          "description": "fresh_restart = clean context each pass, state reloaded from disk (decomposable work). compaction = one session, summarize-and-continue near the limit (continuous thread)."
+        },
+        "on_disk": {
+          "type": "boolean",
+          "description": "Must be true. Durable state in the conversation is the context-accumulation anti-pattern."
+        },
+        "durable_context": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Files holding conventions/rules the agent re-reads every run, e.g. ['CLAUDE.md']."
+        },
+        "durable_progress": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Files/boards holding what's done/failed/next, e.g. ['progress.txt', 'IMPLEMENTATION_PLAN.md']."
+        }
+      }
+    },
+    "stop_conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_iterations", "no_progress"],
+      "properties": {
+        "success": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The success exit (usually equals goal.end_state / verifier.check)."
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Hard iteration cap. Prevents bleed."
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "At least one resource cap. Prevents metered burn.",
+          "properties": {
+            "max_tokens": {"type": "integer", "minimum": 1},
+            "max_cost_usd": {"type": "number", "minimum": 0},
+            "max_runtime_seconds": {"type": "integer", "minimum": 1}
+          }
+        },
+        "no_progress": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signal", "repeats"],
+          "description": "Stall detection. Halt when a no-progress signal repeats.",
+          "properties": {
+            "signal": {"type": "string", "minLength": 1, "description": "e.g. 'same failing test', 'empty diff'."},
+            "repeats": {"type": "integer", "minimum": 2, "description": "Halt after this many consecutive occurrences."}
+          }
+        }
+      }
+    },
+    "on_stop": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What to do on any stop: summarize changes + open gaps; must never claim a false 'done'."
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "destination": {"type": "string", "description": "Where the result/summary goes, e.g. 'Slack #eng-bots', 'PR comment', 'page on-call'."}
+      }
+    },
+    "maker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {"type": "string"},
+        "effort": {"type": "string"}
+      }
+    },
+    "checker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {"type": "string"},
+        "effort": {"type": "string"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Concurrency and isolation. Relevant once more than one agent runs.",
+      "properties": {
+        "parallelism": {"type": "integer", "minimum": 1, "default": 1},
+        "isolation": {"type": "string", "enum": ["none", "worktree", "sandbox"], "description": "Per-agent private checkout. Required once parallelism > 1 to avoid parallel clobber."}
+      }
+    },
+    "economics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "billing": {"type": "string", "enum": ["prepaid", "metered", "unknown"]},
+        "proven_cheap": {"type": "boolean", "description": "True if this loop has demonstrated an acceptable cost per accepted change."}
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How much the loop may run without a human. The MAX safe level is computed by the validator from the gate rung, scope fence, budget, reversibility, and a proven manual pass; 'requested' must not exceed it.",
+      "properties": {
+        "requested": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3"],
+          "description": "L0 advise/dry-run; L1 propose & confirm at each decision point; L2 act with guardrails (pause only at irreversible/budget/no-progress); L3 unattended (trigger, no human, report after)."
+        },
+        "output_reversibility": {
+          "type": "string",
+          "enum": ["reversible", "outward_facing", "irreversible"],
+          "description": "reversible = a PR/draft/revertable change; outward_facing = posts/sends/publishes; irreversible = prod write, payment, deletion. Anything but 'reversible' caps autonomy below L3."
+        },
+        "proven_manual_pass": {
+          "type": "boolean",
+          "description": "True only after at least one watched/manual run has completed successfully with the intended gate. Required for L3; separate from economics.proven_cheap."
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Open extension point for harness-specific fields.",
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "description": "A completion loop has a single finish line, so stop_conditions.success is required. A cadence loop runs open-ended, so it isn't.",
+      "if": {
+        "properties": {"loop_shape": {"const": "completion"}},
+        "required": ["loop_shape"]
+      },
+      "then": {
+        "properties": {
+          "stop_conditions": {"required": ["success"]}
+        }
+      }
+    }
+  ]
+}

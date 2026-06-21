@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 — unreleased
+Installable CLI package.
+
+- **Package layout:** moved validator and interview compiler logic into `src/super_looper/` with importable APIs and bundled schema resources.
+- **Console command:** added `super-looper` with `questions`, `interview`, `validate`, `render`, `explain`, and `max-autonomy` subcommands.
+- **Compatibility:** kept `scripts/validate_loop_spec.py` and `scripts/design_loop.py` as thin wrappers so existing repo-local commands still work.
+- **Packaging:** added `pyproject.toml`, optional `jsonschema` extra, package metadata, and build artifact ignores.
+- **CI:** added GitHub Actions coverage for script tests, behavioral evals, package install, and packaged CLI smoke tests.
+
 ## 0.3.0 — 2026-06-21
 Unknown-safe compiler + stricter autonomy enforcement.
 

@@ -2,3 +2,9 @@ __pycache__/
 *.pyc
 .DS_Store
 results.jsonl
+build/
+dist/
+*.egg-info/
+.pkg-test/
+.pkg-wheel/
+.venv-cli/

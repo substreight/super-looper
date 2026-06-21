@@ -31,27 +31,36 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 |---|---|
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
-| `schemas/` + `scripts/` | JSON spec schema + dependency-free validator + interview/spec compiler · 44 tests |
+| `src/super_looper/` | installable CLI + importable validator/compiler package |
+| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 44 tests |
 | `examples/` | a worked, valid loop spec + interview answer fixtures |
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
 
 ## Quickstart
 **Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision. Haven't read the skill? Just describe your task — it runs a six-question interview (does it recur? what would automatically prove a result wrong? what must it never touch?) and derives the rest.
 
+**Install the CLI:**
+```
+python -m pip install .
+super-looper --version
+```
+
 **Compile interview answers:**
 ```
-python scripts/design_loop.py questions
-python scripts/design_loop.py interview --answers examples/unknown-gate.answers.json
-python scripts/design_loop.py interview --answers examples/ts-client.answers.json --out draft.loop.json
+super-looper questions
+super-looper interview --answers examples/unknown-gate.answers.json
+super-looper interview --answers examples/ts-client.answers.json --out draft.loop.json
 ```
 If the human can't answer a critical question, the compiler returns `DISCOVERY_REQUIRED` and an L0 discovery plan instead of inventing a loop.
 
 **Validate & preview a spec:**
 ```
-python scripts/validate_loop_spec.py my-loop.json --render     # the structured spec
-python scripts/validate_loop_spec.py my-loop.json --explain    # one plain-language sentence + earned autonomy
+super-looper validate my-loop.json --strict
+super-looper render my-loop.json
+super-looper explain my-loop.json
+super-looper max-autonomy my-loop.json --json
 ```
-Zero deps — uses `jsonschema` if installed, falls back to a built-in checker.
+Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`, otherwise falls back to a built-in checker. The old `python scripts/*.py` commands remain as compatibility wrappers.
 
 **Gate the skill itself** (run after any edit to it):
 ```

@@ -47,9 +47,9 @@ Question 2 decides everything: if nothing can fail the work automatically, route
 **If the human literally cannot answer, do not guess.** Return `DISCOVERY_REQUIRED` and keep autonomy at **L0**. Unknown answers are evidence-gathering work, not missing form fields. Give a short discovery plan: run one watched manual attempt, capture one bad output, name the smallest check that would reject it, define `may_touch` / `must_not_touch`, and set a machine-readable budget cap. Only resume loop design after those facts exist. The deterministic helper is:
 
 ```
-python scripts/design_loop.py questions
-python scripts/design_loop.py interview --answers examples/unknown-gate.answers.json
-python scripts/design_loop.py interview --answers examples/ts-client.answers.json --out draft.loop.json
+super-looper questions
+super-looper interview --answers examples/unknown-gate.answers.json
+super-looper interview --answers examples/ts-client.answers.json --out draft.loop.json
 ```
 
 ## The anatomy of a clean loop
@@ -123,11 +123,11 @@ The block above is the human-readable spec; produce it always. When the loop wil
 The schema and validator exist to enforce this skill's non-negotiables mechanically, so a missing gate or budget fails *before* the loop runs rather than at 3am:
 
 ```
-python scripts/validate_loop_spec.py my-loop.json            # validate (exit 1 on error)
-python scripts/validate_loop_spec.py my-loop.json --render    # print the human-readable spec
-python scripts/validate_loop_spec.py my-loop.json --explain   # one-sentence plain-language preview
-python scripts/validate_loop_spec.py my-loop.json --strict    # treat warnings as errors
-python scripts/design_loop.py interview --answers answers.json --out my-loop.json
+super-looper validate my-loop.json            # validate (exit 1 on error)
+super-looper render my-loop.json              # print the human-readable spec
+super-looper explain my-loop.json             # one-sentence plain-language preview
+super-looper validate my-loop.json --strict   # treat warnings as errors
+super-looper interview --answers answers.json --out my-loop.json
 ```
 
 Structural rules (required fields, enums) live in the schema; the validator adds the judgment the schema can't express and will **error** on: a `self` verifier rung (maker grading itself is off the ladder), `state.on_disk: false` (context-accumulation anti-pattern), an unattended loop with no trustworthy gate, an unattended loop with no budget cap, L2 requested without both a budget cap and scope fence, L3 requested without an unattended trigger, end-to-end rung-1 tool gate, explicit reversible output, or `autonomy.proven_manual_pass: true`, parallelism > 1 with no isolation, and an `autonomy.requested` level higher than the loop has earned (it computes the ceiling via `max_autonomy(spec)` and names what's missing). It **warns** on a same-model checker, an unattended metered loop that isn't proven cheap, a missing budget cap on an attended loop, a gate phrased as a taste judgment or with no machine-decidable signal, a single-pass loop (`max_iterations: 1`) that never iterates and is likely a scheduled one-shot, and spec parts that don't refer to each other (evidence ↔ verifier, success ↔ end_state). The validator is dependency-free (uses the `jsonschema` library if installed, falls back to a built-in checker — a missing or misplaced schema file degrades to the built-in rather than crashing) and importable, so a harness can call `validate(spec)` before each run. A worked instance is in `examples/nightly-export.loop.json`.
@@ -181,7 +181,7 @@ When you surface candidate loops, **every candidate gets the same structure** �
 
 Then present the set **ranked on explicit criteria** (leverage · gate strength · effort · risk), and **stop for the human** to confirm, re-rank, **drop or add candidates (curate which are in scope at all)**, ask questions, or pick — never auto-proceed to building from your own ranking. The human curates *and* orders the set: inclusion is their call as much as order, and the ranking is a recommendation, not a decision.
 
-**Preview in plain language.** Alongside the spec sketch, give a one-sentence, jargon-free preview a non-expert can sanity-check — what it runs, what it checks, when it stops, what it touches, whether the output is reversible, and the autonomy level it's earned. (`scripts/validate_loop_spec.py --explain` renders exactly this from the JSON.) The spec is for you; the sentence is for the person deciding whether to run it.
+**Preview in plain language.** Alongside the spec sketch, give a one-sentence, jargon-free preview a non-expert can sanity-check — what it runs, what it checks, when it stops, what it touches, whether the output is reversible, and the autonomy level it's earned. (`super-looper explain` renders exactly this from the JSON.) The spec is for you; the sentence is for the person deciding whether to run it.
 
 **Refuse helpfully.** A "not a loop" or "can't earn that autonomy" verdict is never a bare no — always pair the *why* with the concrete alternative (a one-shot prompt · a scheduled job (cron/Task Scheduler) · a human-gated draft · a lower autonomy level) and what would unlock more. The job is to route the user to the right tool, not just to decline.
 
@@ -219,6 +219,7 @@ Prove it once, harden it, then automate. Recommend the lightweight portable loop
 - `references/failure-modes.md` — the anti-patterns each missing part produces, how to detect them, and the fix. Read when diagnosing a loop that spins, drifts, exits early, or overspends.
 - `references/evidence.md` — verified citations for the skill's load-bearing empirical claims (self-correction, self-preference, context rot, verifiable rewards).
 - `schemas/loop-spec.schema.json` — JSON Schema for a loop spec. The machine-checkable form of everything above.
+- `src/super_looper/` — installable package and `super-looper` CLI. The `scripts/*.py` files are compatibility wrappers.
 - `scripts/validate_loop_spec.py` — validates a JSON spec (structural + the skill's judgment rules) and renders the human-readable spec from it. Dependency-free; importable as `validate(spec)`.
 - `scripts/test_validate_loop_spec.py` — tests for the validator (pytest, or standalone `python scripts/test_validate_loop_spec.py`).
 - `examples/nightly-export.loop.json` — a worked, valid JSON spec.

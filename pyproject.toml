@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "super-looper"
+version = "0.4.0"
+description = "Conservative agentic loop design, validation, and interview tooling."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [
+  { name = "substreight" }
+]
+keywords = ["agents", "automation", "loops", "validation", "codex"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.optional-dependencies]
+jsonschema = ["jsonschema>=4.18"]
+dev = ["build>=1.2", "twine>=5.0"]
+
+[project.scripts]
+super-looper = "super_looper.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/substreight/super-looper"
+Repository = "https://github.com/substreight/super-looper"
+Issues = "https://github.com/substreight/super-looper/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+super_looper = ["resources/*.json"]
+"super_looper.resources" = ["*.json"]
