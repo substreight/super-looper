@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""Tests for validate_loop_spec.
+
+Runs under pytest, or standalone with no test runner:  python test_validate_loop_spec.py
+Zero third-party deps required (mirrors the validator's own zero-dep promise).
+"""
+import copy
+import json
+import os
+import random
+import tempfile
+
+import validate_loop_spec as v
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+EXAMPLE = os.path.join(HERE, "..", "examples", "nightly-export.loop.json")
+with open(EXAMPLE) as _f:
+    GOOD = json.load(_f)
+
+
+def _spec(**overrides):
+    s = copy.deepcopy(GOOD)
+    s.update(overrides)
+    return s
+
+
+def _drop(d, key):
+    d = copy.deepcopy(d)
+    d.pop(key, None)
+    return d
+
+
+# ---- the worked example must stay perfectly clean ----
+
+def test_good_example_is_clean():
+    errors, warnings = v.validate(GOOD)
+    assert errors == [], errors
+    assert warnings == [], warnings
+
+
+# ---- existing non-negotiables still fire ----
+
+def test_self_rung_errors():
+    s = _spec(verifier={"rung": "self", "check": "the model thinks it is right"})
+    errors, _ = v.validate(s)
+    assert any("off the ladder" in e for e in errors), errors
+
+
+def test_on_disk_false_errors():
+    s = _spec(state={"architecture": "fresh_restart", "on_disk": False})
+    errors, _ = v.validate(s)
+    assert any("on_disk" in e for e in errors), errors
+
+
+def test_parallel_without_isolation_errors():
+    s = _spec(execution={"parallelism": 3, "isolation": "none"})
+    errors, _ = v.validate(s)
+    assert any("parallelism" in e for e in errors), errors
+
+
+# ---- Bug 3: budget is an error when unattended, a warning otherwise ----
+
+def test_unattended_without_budget_errors():
+    s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"))  # example is unattended
+    errors, _ = v.validate(s)
+    assert any("budget" in e for e in errors), errors
+
+
+def test_attended_without_budget_warns_only():
+    s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"),
+              trigger={"type": "manual", "unattended": False})
+    errors, warnings = v.validate(s)
+    assert not any("budget" in e for e in errors), errors
+    assert any("budget" in w for w in warnings), warnings
+
+
+# ---- Bug 4: success required for completion, optional for cadence ----
+
+def test_completion_requires_success_structurally():
+    s = _spec(loop_shape="completion",
+              stop_conditions=_drop(GOOD["stop_conditions"], "success"))
+    errors, _ = v.validate(s)
+    assert any("success" in e for e in errors), errors
+
+
+def test_cadence_allows_missing_success():
+    s = _spec(loop_shape="cadence",
+              stop_conditions={"max_iterations": 5,
+                               "budget": {"max_runtime_seconds": 600},
+                               "no_progress": {"signal": "no new PRs", "repeats": 3}},
+              trigger={"type": "schedule", "detail": "every 15m", "unattended": True})
+    errors, _ = v.validate(s)
+    assert not any("success" in e.lower() for e in errors), errors
+
+
+def test_builtin_path_requires_completion_success():
+    # exercise the dependency-free checker directly (independent of jsonschema)
+    s = _spec(loop_shape="completion",
+              stop_conditions=_drop(GOOD["stop_conditions"], "success"))
+    errs = v._builtin_structural(s)
+    assert any("success" in e for e in errs), errs
+
+
+# ---- Tier 1: gate-quality floor ----
+
+def test_weasel_gate_warns():
+    s = _spec(verifier={"rung": "tool", "check": "the output looks good"})
+    _, warnings = v.validate(s)
+    assert any("taste judgment" in w for w in warnings), warnings
+
+
+def test_non_measurable_gate_warns():
+    s = _spec(verifier={"rung": "tool", "check": "the report is acceptable"})
+    _, warnings = v.validate(s)
+    assert any("machine-decidable" in w for w in warnings), warnings
+
+
+def test_incoherent_evidence_warns():
+    g = copy.deepcopy(GOOD["goal"])
+    g["evidence"] = "completely unrelated banana"
+    s = _spec(goal=g)
+    _, warnings = v.validate(s)
+    assert any("evidence shares no term" in w for w in warnings), warnings
+
+
+def test_incoherent_success_warns():
+    sc = copy.deepcopy(GOOD["stop_conditions"])
+    sc["success"] = "the moon is full tonight"
+    s = _spec(stop_conditions=sc)
+    _, warnings = v.validate(s)
+    assert any("success shares no term" in w for w in warnings), warnings
+
+
+# ---- render round-trips ----
+
+def test_render_runs():
+    out = v.render(GOOD)
+    assert "GOAL:" in out and "VERIFY:" in out
+
+
+# ---- regression corpus: known-bad specs must keep tripping their lints ----
+# Each row: (name, spec, error-substrings that must appear, warning-substrings that must appear).
+
+BAD_CORPUS = [
+    ("self_rung",
+     _spec(verifier={"rung": "self", "check": "the model thinks it is right"}),
+     ["off the ladder"], []),
+    ("on_disk_false",
+     _spec(state={"architecture": "compaction", "on_disk": False}),
+     ["on_disk"], []),
+    ("independent_contradiction",
+     _spec(verifier={"rung": "independent_model", "check": "reviewer approves the diff",
+                     "independent": False}),
+     ["independent"], []),
+    ("parallel_no_isolation",
+     _spec(execution={"parallelism": 2, "isolation": "none"}),
+     ["parallelism"], []),
+    ("unattended_no_budget",
+     _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget")),
+     ["budget"], []),
+    ("missing_no_progress",
+     _spec(stop_conditions=_drop(GOOD["stop_conditions"], "no_progress")),
+     ["no_progress"], []),
+    ("metered_unattended",
+     _spec(economics={"billing": "metered"}),
+     [], ["metered"]),
+    ("weasel_gate",
+     _spec(verifier={"rung": "tool", "check": "output looks good", "end_to_end": True}),
+     [], ["taste judgment"]),
+    ("human_gate",
+     _spec(verifier={"rung": "human", "check": "a person signs off on the result"}),
+     [], ["human-in-the-loop"]),
+    ("cadence_with_success",
+     _spec(loop_shape="cadence"),
+     [], ["cadence"]),
+]
+
+
+def test_bad_corpus():
+    for name, spec, exp_err, exp_warn in BAD_CORPUS:
+        errors, warnings = v.validate(spec)
+        blob_e, blob_w = " || ".join(errors), " || ".join(warnings)
+        for sub in exp_err:
+            assert sub in blob_e, f"[{name}] expected error containing {sub!r}; got {errors}"
+        for sub in exp_warn:
+            assert sub in blob_w, f"[{name}] expected warning containing {sub!r}; got {warnings}"
+
+
+# ---- robustness: validate() is a harness gate, so it must never raise ----
+
+def test_fuzz_validate_never_raises():
+    random.seed(1234)
+    junk = [None, 0, 1, -1, "", "x", [], {}, [1, 2], {"k": "v"}, True, False, 3.14, "looks good"]
+    keys = list(GOOD.keys()) + ["report", "maker", "checker", "execution", "economics", "meta"]
+    for _ in range(400):
+        spec = copy.deepcopy(GOOD)
+        for _ in range(random.randint(1, 6)):
+            roll, k = random.random(), random.choice(keys)
+            if roll < 0.4:
+                spec.pop(k, None)
+            elif roll < 0.8:
+                spec[k] = random.choice(junk)
+            else:
+                spec["junk_" + k] = random.choice(junk)
+        errors, warnings = v.validate(spec)
+        assert isinstance(errors, list) and isinstance(warnings, list)
+    for bad in (None, 5, "x", [1], 3.2, True):
+        errors, warnings = v.validate(bad)
+        assert isinstance(errors, list) and isinstance(warnings, list)
+
+
+def test_semantic_tolerates_malformed_subobjects():
+    # _semantic assumes structural already passed; harden it anyway so the gate can't crash.
+    weird = copy.deepcopy(GOOD)
+    weird.update(maker="not a dict", verifier=["also", "wrong"], economics=5, trigger="nightly")
+    errors, warnings = v._semantic(weird)
+    assert isinstance(errors, list) and isinstance(warnings, list)
+
+
+def test_cli_render_on_malformed_does_not_crash():
+    weird = _spec(verifier="broken")
+    fd, path = tempfile.mkstemp(suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(weird, f)
+    try:
+        rc = v._main(["prog", path, "--render"])  # must surface errors, not a traceback
+        assert isinstance(rc, int)
+    finally:
+        os.unlink(path)
+
+
+def test_single_pass_loop_warns():
+    sc = copy.deepcopy(GOOD["stop_conditions"])
+    sc["max_iterations"] = 1
+    s = _spec(stop_conditions=sc)
+    _, warnings = v.validate(s)
+    assert any("max_iterations is 1" in w for w in warnings), warnings
+
+
+def test_multi_pass_loop_does_not_warn_single_pass():
+    # the worked example (max_iterations 3) must not trip the single-pass warning
+    _, warnings = v.validate(GOOD)
+    assert not any("max_iterations is 1" in w for w in warnings), warnings
+
+
+def _run_all():
+    fns = sorted((n, fn) for n, fn in globals().items()
+                 if n.startswith("test_") and callable(fn))
+    failed = 0
+    for name, fn in fns:
+        try:
+            fn()
+            print(f"PASS {name}")
+        except AssertionError as e:
+            failed += 1
+            print(f"FAIL {name}: {e}")
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(_run_all())

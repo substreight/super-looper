@@ -1,0 +1,10 @@
+{
+  "recorded": "2026-06-21",
+  "skill_state": "loop-design after the S3 gate-covers-deliverable fix and the human-decision-points / proposal-output-contract additions",
+  "harness": "fresh blind subagents (Claude Sonnet), one per scenario, verdicts as in results.example.jsonl",
+  "scenarios": 8,
+  "passed": 8,
+  "accuracy": 1.0,
+  "min_required": 0.8,
+  "notes": "Baseline after fixing the gate-covers-deliverable gap: calendar-email correctly flips from AUTONOMOUS_LOOP to USE_SCHEDULER. Re-run via EVAL.md after any edit to SKILL.md or references/; accuracy must not drop below min_required and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8` -> 8/8."
+}

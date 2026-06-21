@@ -1,0 +1,46 @@
+{
+  "name": "nightly-export-guard",
+  "goal": {
+    "end_state": "nightly export file validates against schema AND row_count > 0",
+    "evidence": "schema validator exits 0 and reported row_count > 0",
+    "constraints": ["do not modify the schema", "write only the output file"],
+    "budget": "at most 3 export attempts per night"
+  },
+  "scope": {
+    "may_touch": ["pipelines/export/", "out/nightly.parquet"],
+    "must_not_touch": ["schemas/", "prod credentials"]
+  },
+  "loop_shape": "completion",
+  "trigger": {
+    "type": "schedule",
+    "detail": "daily 02:00",
+    "unattended": true
+  },
+  "iteration": [
+    "read last-run timestamp and this-run attempt log from disk",
+    "run export",
+    "validate output against schema and check row count",
+    "if invalid, read the validation error and retry with the documented fix (different fix than last attempt)"
+  ],
+  "verifier": {
+    "rung": "tool",
+    "check": "schema valid AND row_count > 0",
+    "independent": true,
+    "end_to_end": true
+  },
+  "state": {
+    "architecture": "fresh_restart",
+    "on_disk": true,
+    "durable_progress": ["state/last_success.txt", "state/attempt_log.jsonl"]
+  },
+  "stop_conditions": {
+    "success": "schema valid AND row_count > 0",
+    "max_iterations": 3,
+    "budget": {"max_runtime_seconds": 1800},
+    "no_progress": {"signal": "same validation error", "repeats": 2}
+  },
+  "on_stop": "if still failing, page on-call with the exact validation error; do NOT mark the run successful",
+  "report": {"destination": "success -> log; failure -> page on-call"},
+  "maker": {"model": "cheap", "effort": "low"},
+  "economics": {"billing": "prepaid", "proven_cheap": true}
+}
