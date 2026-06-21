@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — 2026-06-21
+Autonomy dial + friendliness on-ramps.
+
+- **Autonomy dial (L0–L3):** autonomy is *earned, not chosen*. New `## Autonomy levels` section in `SKILL.md`; the validator computes the earned ceiling — `max_autonomy(spec)` — from gate rung + budget + scope fence + output reversibility + a proven manual pass, and **errors when `autonomy.requested` exceeds it**, naming what's missing. New optional `autonomy` block in the schema (`requested`, `output_reversibility`).
+- **Friendliness on-ramps (`SKILL.md`):** a 6-question *guided design interview* (qualify without making the user read the skill), a *plain-language preview* (`validate_loop_spec.py --explain` → one jargon-free sentence + `render_plain()`), an explicit *dry-run (L0)* first step in Build order, and a *helpful-refusal* contract (always pair the why with the concrete alternative + what unlocks more).
+- **Tests/eval:** +10 validator tests (30 total); +1 eval scenario (`unattended-no-gate`), baseline 9/9.
+
 ## 0.1.0 — 2026-06-21
 First packaged release.
 

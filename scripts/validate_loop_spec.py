@@ -14,11 +14,13 @@ Two layers of checking:
 Usage:
     python validate_loop_spec.py spec.json            # validate; exit 1 on error
     python validate_loop_spec.py spec.json --render    # print human-readable spec
-    python validate_loop_spec.py spec.json --strict     # treat warnings as errors
+    python validate_loop_spec.py spec.json --explain   # print a plain-language preview
+    python validate_loop_spec.py spec.json --strict    # treat warnings as errors
 
 Importable:
-    from validate_loop_spec import validate, render
+    from validate_loop_spec import validate, render, render_plain, max_autonomy
     errors, warnings = validate(spec_dict)
+    level, missing = max_autonomy(spec_dict)   # highest autonomy the loop has earned
 """
 
 import json
@@ -78,6 +80,46 @@ def _tokens(text):
 def _d(x):
     """Coerce to dict so the semantic lint never raises on a malformed sub-object."""
     return x if isinstance(x, dict) else {}
+
+
+_AUTONOMY_ORDER = ["L0", "L1", "L2", "L3"]
+
+
+def max_autonomy(spec):
+    """Compute the highest autonomy level a loop has EARNED, plus what's missing to go higher.
+
+    Returns (level, missing): level in L0..L3, missing = the gaps blocking the next level.
+    Autonomy is earned, never chosen: the ceiling is set by the gate rung, then capped by
+    the budget cap, scope fence, output reversibility, and a proven manual pass. Pure; reads
+    the same fields the semantic checks read.
+    """
+    spec = _d(spec)
+    verifier = _d(spec.get("verifier"))
+    scope = _d(spec.get("scope"))
+    sc = _d(spec.get("stop_conditions"))
+    economics = _d(spec.get("economics"))
+    reversibility = _d(spec.get("autonomy")).get("output_reversibility")
+    rung = verifier.get("rung")
+
+    # The gate rung sets the hard ceiling.
+    if rung in ("self", None):
+        return "L1", ["a real gate (verifier.rung 'tool' or 'independent_model' — self/none can't run unsupervised)"]
+    if rung == "human":
+        return "L1", ["an automatic gate (a human gate is human-in-the-loop by definition)"]
+
+    # rung is 'tool' or 'independent_model': L2 is reachable; L3 needs every guardrail.
+    missing = []
+    if rung != "tool":
+        missing.append("a rung-1 tool gate on the deliverable (independent_model tops out at L2)")
+    if not sc.get("budget"):
+        missing.append("a budget cap (stop_conditions.budget)")
+    if not scope.get("must_not_touch"):
+        missing.append("a blast-radius fence (scope.must_not_touch)")
+    if reversibility not in (None, "reversible"):
+        missing.append(f"reversible output (it's {reversibility} — a human must own the irreversible step)")
+    if not economics.get("proven_cheap"):
+        missing.append("a proven manual pass (economics.proven_cheap)")
+    return ("L3", []) if not missing else ("L2", missing)
 
 
 ENUMS = {
@@ -271,6 +313,15 @@ def _semantic(spec):
         warnings.append("stop_conditions.success shares no term with goal.end_state. The success exit and the "
                         "goal should name the same finish line.")
 
+    # Autonomy dial: the requested level must not exceed what the loop has earned.
+    requested = _d(spec.get("autonomy")).get("requested")
+    if requested in _AUTONOMY_ORDER:
+        earned, missing = max_autonomy(spec)
+        if _AUTONOMY_ORDER.index(requested) > _AUTONOMY_ORDER.index(earned):
+            errors.append(f"autonomy.requested is {requested} but this loop has only earned {earned}. To reach "
+                          f"{requested}, add: " + "; ".join(missing) + ". Dial down freely; you can only dial up "
+                          "when the gate licenses it.")
+
     return errors, warnings
 
 
@@ -345,7 +396,48 @@ def render(spec):
     ex = spec.get("execution", {})
     if ex.get("parallelism", 1) > 1 or ex.get("isolation"):
         lines.append(f"EXECUTION:   parallelism {ex.get('parallelism', 1)}, isolation {ex.get('isolation', 'none')}")
+    if spec.get("autonomy"):
+        a = _d(spec.get("autonomy"))
+        earned, _ = max_autonomy(spec)
+        bits = f"requested {a['requested']} / max earned {earned}" if a.get("requested") else f"max earned {earned}"
+        if a.get("output_reversibility"):
+            bits += f"; output {a['output_reversibility']}"
+        lines.append(f"AUTONOMY:    {bits}")
     return "\n".join(lines)
+
+
+def render_plain(spec):
+    """One jargon-free sentence describing what the loop will do — for a human deciding whether to run it."""
+    spec = _d(spec)
+    g, sc, v = _d(spec.get("goal")), _d(spec.get("stop_conditions")), _d(spec.get("verifier"))
+    scope, trig = _d(spec.get("scope")), _d(spec.get("trigger"))
+    parts = [f"Runs {trig.get('detail') or trig.get('type') or 'on demand'}"]
+    if v.get("check"):
+        parts.append(f"checks that {v['check']}")
+    stops = []
+    if sc.get("max_iterations"):
+        stops.append(f"{sc['max_iterations']} tries")
+    b = _d(sc.get("budget"))
+    if b.get("max_cost_usd") is not None:
+        stops.append(f"${b['max_cost_usd']}")
+    elif b.get("max_tokens"):
+        stops.append(f"{b['max_tokens']} tokens")
+    elif b.get("max_runtime_seconds"):
+        stops.append(f"{b['max_runtime_seconds']}s")
+    if stops:
+        parts.append("stops after " + " or ".join(stops))
+    if scope.get("may_touch"):
+        parts.append("touches only " + ", ".join(scope["may_touch"]))
+    if scope.get("must_not_touch"):
+        parts.append("never " + ", ".join(scope["must_not_touch"]))
+    rev = _d(spec.get("autonomy")).get("output_reversibility")
+    rev_txt = {"reversible": "output is reversible (e.g. a PR you review)",
+               "outward_facing": "output is OUTWARD-FACING (posts/sends) — a human should approve it",
+               "irreversible": "output is IRREVERSIBLE (prod/payment/delete) — a human must own that step"}
+    if rev in rev_txt:
+        parts.append(rev_txt[rev])
+    earned, _ = max_autonomy(spec)
+    return "; ".join(parts) + f".  [max safe autonomy: {earned}]"
 
 
 # ---------- CLI ----------
@@ -360,6 +452,12 @@ def _main(argv):
         spec = json.load(f)
 
     errors, warnings = validate(spec)
+
+    if "--explain" in flags:
+        try:
+            print(render_plain(spec))
+        except Exception as exc:
+            print(f"(could not explain malformed spec: {exc})")
 
     if "--render" in flags:
         try:

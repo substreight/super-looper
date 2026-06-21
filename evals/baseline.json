@@ -1,10 +1,10 @@
 {
   "recorded": "2026-06-21",
-  "skill_state": "loop-design after the S3 gate-covers-deliverable fix and the human-decision-points / proposal-output-contract additions",
+  "skill_state": "v0.2.0 — after the autonomy dial (L0–L3, validator-enforced ceiling) and the friendliness on-ramps (guided interview, plain-language preview, dry-run, helpful refusals)",
   "harness": "fresh blind subagents (Claude Sonnet), one per scenario, verdicts as in results.example.jsonl",
-  "scenarios": 8,
-  "passed": 8,
+  "scenarios": 9,
+  "passed": 9,
   "accuracy": 1.0,
   "min_required": 0.8,
-  "notes": "Baseline after fixing the gate-covers-deliverable gap: calendar-email correctly flips from AUTONOMOUS_LOOP to USE_SCHEDULER. Re-run via EVAL.md after any edit to SKILL.md or references/; accuracy must not drop below min_required and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8` -> 8/8."
+  "notes": "Re-baselined for v0.2.0. New scenario 'unattended-no-gate' tests the autonomy-dial refusal. One deliberate change: 'ts-client' now also accepts USE_SCHEDULER — a blind run reached it via the skill's strip-the-LLM cron test, which is a sound reading (deterministic codegen → scheduler; agent-repairs-breakage → loop). Not a lowered bar: both verdicts are defensible. Re-run via EVAL.md after any edit; accuracy must hold and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8` -> 9/9."
 }

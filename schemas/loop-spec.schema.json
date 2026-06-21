@@ -212,6 +212,23 @@
         "proven_cheap": {"type": "boolean", "description": "True if this loop has demonstrated an acceptable cost per accepted change."}
       }
     },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How much the loop may run without a human. The MAX safe level is computed by the validator from the gate rung, scope fence, budget, reversibility, and a proven manual pass; 'requested' must not exceed it.",
+      "properties": {
+        "requested": {
+          "type": "string",
+          "enum": ["L0", "L1", "L2", "L3"],
+          "description": "L0 advise/dry-run; L1 propose & confirm at each decision point; L2 act with guardrails (pause only at irreversible/budget/no-progress); L3 unattended (trigger, no human, report after)."
+        },
+        "output_reversibility": {
+          "type": "string",
+          "enum": ["reversible", "outward_facing", "irreversible"],
+          "description": "reversible = a PR/draft/revertable change; outward_facing = posts/sends/publishes; irreversible = prod write, payment, deletion. Anything but 'reversible' caps autonomy below L3."
+        }
+      }
+    },
     "meta": {
       "type": "object",
       "description": "Open extension point for harness-specific fields.",

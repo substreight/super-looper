@@ -33,6 +33,17 @@ Recommend a loop **only if all of these hold**:
 
 Miss one → say so plainly and recommend the alternative: a one-shot prompt, an interactive session, a human-in-the-loop workflow, or — when it's deterministic work on a timer — a plain scheduled job (cron / Task Scheduler), no agent. Talking someone out of an unnecessary loop is a successful use of this skill, not a failure. Don't build machinery to look helpful.
 
+**Qualify by interview, not lecture.** If the person hasn't read this skill, don't make them — ask six questions and derive the rest:
+
+1. **Does it recur, and how often?** (weekly+ to earn the setup)
+2. **What would automatically prove a result is *wrong*?** — the gate, in their words. *If the honest answer is "a human would just know," it isn't a loop yet; stop here.*
+3. **What's the finished state, and what evidence shows you reached it?** (end_state + evidence)
+4. **What must it never touch, and does its output post / ship / delete anything?** (scope fence + reversibility)
+5. **Attended or unattended — and on prepaid or metered capacity?** (sets the autonomy ceiling and the budget bar)
+6. **Most you'll spend per run, and per accepted result?** (the budget cap and the economic test)
+
+Question 2 decides everything: if nothing can fail the work automatically, route them to a one-shot, a scheduled job, or a human-gated draft — don't build a loop.
+
 ## The anatomy of a clean loop
 
 Five parts. Name each one explicitly; a loop missing any of them fails in a predictable way (see `references/failure-modes.md`).
@@ -106,10 +117,11 @@ The schema and validator exist to enforce this skill's non-negotiables mechanica
 ```
 python scripts/validate_loop_spec.py my-loop.json            # validate (exit 1 on error)
 python scripts/validate_loop_spec.py my-loop.json --render    # print the human-readable spec
+python scripts/validate_loop_spec.py my-loop.json --explain   # one-sentence plain-language preview
 python scripts/validate_loop_spec.py my-loop.json --strict    # treat warnings as errors
 ```
 
-Structural rules (required fields, enums) live in the schema; the validator adds the judgment the schema can't express and will **error** on: a `self` verifier rung (maker grading itself is off the ladder), `state.on_disk: false` (context-accumulation anti-pattern), an unattended loop with no trustworthy gate, an unattended loop with no budget cap, and parallelism > 1 with no isolation. It **warns** on a same-model checker, an unattended metered loop that isn't proven cheap, a missing budget cap on an attended loop, a gate phrased as a taste judgment or with no machine-decidable signal, a single-pass loop (`max_iterations: 1`) that never iterates and is likely a scheduled one-shot, and spec parts that don't refer to each other (evidence ↔ verifier, success ↔ end_state). The validator is dependency-free (uses the `jsonschema` library if installed, falls back to a built-in checker — a missing or misplaced schema file degrades to the built-in rather than crashing) and importable, so a harness can call `validate(spec)` before each run. A worked instance is in `examples/nightly-export.loop.json`.
+Structural rules (required fields, enums) live in the schema; the validator adds the judgment the schema can't express and will **error** on: a `self` verifier rung (maker grading itself is off the ladder), `state.on_disk: false` (context-accumulation anti-pattern), an unattended loop with no trustworthy gate, an unattended loop with no budget cap, parallelism > 1 with no isolation, and an `autonomy.requested` level higher than the loop has earned (it computes the ceiling via `max_autonomy(spec)` and names what's missing). It **warns** on a same-model checker, an unattended metered loop that isn't proven cheap, a missing budget cap on an attended loop, a gate phrased as a taste judgment or with no machine-decidable signal, a single-pass loop (`max_iterations: 1`) that never iterates and is likely a scheduled one-shot, and spec parts that don't refer to each other (evidence ↔ verifier, success ↔ end_state). The validator is dependency-free (uses the `jsonschema` library if installed, falls back to a built-in checker — a missing or misplaced schema file degrades to the built-in rather than crashing) and importable, so a harness can call `validate(spec)` before each run. A worked instance is in `examples/nightly-export.loop.json`.
 
 When emitting JSON, fill the four `goal` parts (end_state, evidence, constraints, budget) deliberately — they are the contract, and the validator treats vague/empty ones as errors. One honest limit: the validator can flag a gate that's absent, self-graded, or phrased as taste — it **cannot** confirm that a gate which *exists* actually separates good output from bad. That's a property of how the gate behaves on real inputs, not of the spec text; only running the gate (or tracking accept-rate over real runs) closes that gap. Designing a discriminating gate stays your job.
 
@@ -122,6 +134,26 @@ A loop is autonomous *inside* its gate; the human's leverage is at the edges. Ma
 3. **Gate approval** — the validator can prove a gate *exists*, never that it's *good*. The human signs off on the verifier, especially rungs 2–3.
 4. **Scope + budget + economics** — before scheduling: the must-not-touch list, the budget cap, prepaid-vs-metered, attended-vs-unattended. The human owns the blast radius.
 5. **Output review** — the manual first pass, then ongoing review of what the loop ships (the comprehension-debt gate). Loop count is bounded by human review throughput, not by what the agent can generate.
+
+## Autonomy levels — earn the dial
+
+Autonomy is not a switch the user flips; it's a dial whose **ceiling the loop has to earn.** A free "run it fully autonomously" toggle would bypass the one thing that makes autonomy safe — the gate. The human can always dial *down* (more involvement); they can only dial *up* if the loop's properties license it — and if they can't, **refuse and name what's missing.**
+
+| Level | What it does | Earned when |
+|---|---|---|
+| **L0 · advise / dry-run** | designs it, previews the plan + cost + blast radius, runs nothing | always |
+| **L1 · propose & confirm** | does the work, stops at each human decision point (above) | always |
+| **L2 · act with guardrails** | runs end-to-end, pauses only at the non-negotiables (irreversible/outward action · budget breach · no-progress) | a real gate (rung 1–2) + scope fence + budget |
+| **L3 · unattended** | runs on a trigger, no human in the loop, reports after | rung-1 tool gate on the deliverable + scope `must_not_touch` + budget cap + reversible output + a proven manual pass |
+
+The ceiling is the **lowest** cap implied by these axes:
+- **Gate rung** — `self`/none → L1 (can't run unsupervised without a real gate); `human` → L1 (a human gate *is* human-in-the-loop); `independent_model` → L2; `tool` → up to L3.
+- **Budget** — no cap → max L2 (an unattended loop with no budget is the overnight-runaway-bill failure mode).
+- **Scope** — no `must_not_touch` fence → max L2 (nothing bounds the blast radius).
+- **Reversibility** — output that's outward-facing or irreversible → max L2 (a human owns the irreversible step). A PR you review is reversible; a posted message or a prod write is not.
+- **Proven** — not yet proven by ≥1 manual pass → max L2 (autonomy is *earned by demonstration*, not asserted — see Build order).
+
+This is why a rung-1, PR-emitting loop can go L3 while a "post a first reply to every issue" loop (fuzzy gate, outward-facing) can't. The validator computes this — `max_autonomy(spec)` — and **errors if `autonomy.requested` exceeds what's earned**, listing what to add. When a user asks for more autonomy than the loop has earned, don't argue — name the missing piece ("make the gate rung-1, or keep a human at the publish step, and L3 unlocks"). That refusal *is* the product.
 
 ## Proposing loops — the output contract
 
@@ -137,6 +169,10 @@ When you surface candidate loops, **every candidate gets the same structure** �
 - **Rank rationale + confidence**, and **the one open question** a human should answer
 
 Then present the set **ranked on explicit criteria** (leverage · gate strength · effort · risk), and **stop for the human** to confirm, re-rank, **drop or add candidates (curate which are in scope at all)**, ask questions, or pick — never auto-proceed to building from your own ranking. The human curates *and* orders the set: inclusion is their call as much as order, and the ranking is a recommendation, not a decision.
+
+**Preview in plain language.** Alongside the spec sketch, give a one-sentence, jargon-free preview a non-expert can sanity-check — what it runs, what it checks, when it stops, what it touches, whether the output is reversible, and the autonomy level it's earned. (`scripts/validate_loop_spec.py --explain` renders exactly this from the JSON.) The spec is for you; the sentence is for the person deciding whether to run it.
+
+**Refuse helpfully.** A "not a loop" or "can't earn that autonomy" verdict is never a bare no — always pair the *why* with the concrete alternative (a one-shot prompt · a scheduled job (cron/Task Scheduler) · a human-gated draft · a lower autonomy level) and what would unlock more. The job is to route the user to the right tool, not just to decline.
 
 ## Cost discipline
 
@@ -157,10 +193,11 @@ Two harness details that bite once you scale past one loop. **Isolation:** the m
 
 Scheduling something you haven't proven by hand is how loops blow up while you sleep.
 
-1. **Get one manual run reliable** — by hand, watching it.
-2. **Save it as a skill / reusable instruction** — rules, patterns, and a hard list of what it must never touch.
-3. **Wrap it in a loop** — add the gate and the stop conditions.
-4. **Then schedule or trigger it.**
+1. **Dry-run first (L0)** — produce the change / diff / PR *without applying it*, and read it. The cheapest way to see what the loop will actually do before it can do anything.
+2. **Get one manual run reliable** — by hand, watching it apply. This is the *proven manual pass* that L3 (unattended) requires: no proven run, no unattended.
+3. **Save it as a skill / reusable instruction** — rules, patterns, and a hard list of what it must never touch.
+4. **Wrap it in a loop** — add the gate and the stop conditions.
+5. **Raise the autonomy dial only as far as the loop has earned** (see *Autonomy levels*), then schedule or trigger it.
 
 Prove it once, harden it, then automate. Recommend the lightweight portable loop (Template 2) before any hosted machinery — most everyday tasks never need the heavy version, and saying so is part of the job.
 

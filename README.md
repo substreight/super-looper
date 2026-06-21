@@ -29,9 +29,9 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 |---|---|
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
-| `schemas/` + `scripts/` | JSON spec schema + a dependency-free validator (`validate(spec) -> errors, warnings`) · 20 tests |
+| `schemas/` + `scripts/` | JSON spec schema + a dependency-free validator (`validate(spec) -> errors, warnings`) · 30 tests |
 | `examples/` | a worked, valid loop spec |
-| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (8/8 baseline) |
+| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (9/9 baseline) |
 
 ## Quickstart
 **Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision.
@@ -44,7 +44,7 @@ Zero deps — uses `jsonschema` if installed, falls back to a built-in checker.
 
 **Gate the skill itself** (run after any edit to it):
 ```
-cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 8/8
+cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 9/9
 ```
 
 ## The five-part anatomy
@@ -53,6 +53,8 @@ cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8
 - **State** — on disk, not accumulating in the context. Clean-ish context per unit of work.
 - **Stop conditions** — success · a hard cap (iterations **and** budget) · no-progress detection. All three.
 - **Maker ≠ checker** — don't let the agent that did the work be its own only gate.
+
+**Autonomy is earned, not toggled.** A loop runs as unattended as it has *earned* — the validator computes the ceiling (L0 advise → L3 unattended) from its gate rung, budget, scope fence, output reversibility, and a proven manual pass, and refuses any request above it, naming what's missing. `--explain` prints a plain-language preview so a non-expert can sanity-check what it'll do before it runs.
 
 ## Why trust any of this
 The load-bearing claims are sourced in [`references/evidence.md`](references/evidence.md): self-correction limits (Huang 2024), self-preference bias (Panickssery 2024), context rot (Liu/TACL 2024; Chroma & NoLiMa 2025), and verifiable rewards (Tulu 3; DeepSeek-R1). The named techniques ("Ralph," evaluator-optimizer, harnesses) are mostly blog-evidenced — so design from the principles, not the hype.

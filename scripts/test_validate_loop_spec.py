@@ -243,6 +243,67 @@ def test_multi_pass_loop_does_not_warn_single_pass():
     assert not any("max_iterations is 1" in w for w in warnings), warnings
 
 
+# ---- autonomy dial ----
+
+def test_good_example_earns_l3():
+    # nightly-export has a tool gate + budget + must_not_touch + proven_cheap -> top level.
+    level, missing = v.max_autonomy(GOOD)
+    assert level == "L3", (level, missing)
+    assert missing == [], missing
+
+
+def test_self_rung_caps_at_l1():
+    level, missing = v.max_autonomy(_spec(verifier={"rung": "self", "check": "x"}))
+    assert level == "L1", (level, missing)
+
+
+def test_independent_model_caps_at_l2():
+    s = _spec(verifier={"rung": "independent_model", "check": "reviewer ok", "independent": True})
+    level, _ = v.max_autonomy(s)
+    assert level == "L2", level
+
+
+def test_request_within_ceiling_ok():
+    s = _spec(autonomy={"requested": "L3"})  # GOOD earns L3
+    errors, _ = v.validate(s)
+    assert not any("autonomy.requested" in e for e in errors), errors
+
+
+def test_request_l3_without_gate_errors():
+    s = _spec(verifier={"rung": "self", "check": "x"}, autonomy={"requested": "L3"})
+    errors, _ = v.validate(s)
+    assert any("only earned L1" in e for e in errors), errors
+
+
+def test_request_l3_without_budget_errors():
+    s = _spec(stop_conditions=_drop(GOOD["stop_conditions"], "budget"), autonomy={"requested": "L3"})
+    errors, _ = v.validate(s)
+    assert any("only earned L2" in e and "budget cap" in e for e in errors), errors
+
+
+def test_irreversible_output_caps_below_l3():
+    s = _spec(autonomy={"requested": "L3", "output_reversibility": "irreversible"})
+    errors, _ = v.validate(s)
+    assert any("only earned L2" in e and "irreversible" in e for e in errors), errors
+
+
+def test_dialing_down_always_ok():
+    s = _spec(verifier={"rung": "self", "check": "x"}, autonomy={"requested": "L1"})
+    errors, _ = v.validate(s)
+    assert not any("autonomy.requested" in e for e in errors), errors  # no autonomy error; self-rung error is separate
+
+
+def test_render_plain_mentions_autonomy():
+    out = v.render_plain(GOOD)
+    assert isinstance(out, str) and "max safe autonomy" in out and "L3" in out
+
+
+def test_autonomy_schema_field_is_optional_and_valid():
+    # adding the autonomy block must not break structural validation
+    errors, warnings = v.validate(_spec(autonomy={"requested": "L2", "output_reversibility": "reversible"}))
+    assert errors == [], errors
+
+
 def _run_all():
     fns = sorted((n, fn) for n, fn in globals().items()
                  if n.startswith("test_") and callable(fn))
