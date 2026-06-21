@@ -19,6 +19,8 @@
 
 The unglamorous pitch: most "autonomous loop" ideas are net-negative — they spin, drift, or quietly bill you to ship confidently-wrong work *faster*. So super-looper's first job is to say **no**. Its second is to make the rare loop that *is* worth building actually converge — by forcing you to design the gate before the machinery, keep state out of the context window, and never let the thing being judged grade itself. It enforces the non-negotiables with a machine-checkable spec + a **zero-dependency validator**, and ships with **its own eval suite** so the skill can't silently regress.
 
+It insists on two more things. Autonomy is **earned, not toggled** — a loop runs only as unattended as its gate, scope, budget, and a proven run allow, and the validator refuses anything more. And you shouldn't have to read the skill to use it: a six-question interview derives the verdict and the spec, and `--explain` previews any loop in one plain sentence.
+
 ## The one idea
 An agentic loop runs DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE on its own, until an objective gate passes or a hard limit trips — no human pushing each step. The part that makes it a loop and not a model talking to itself is **VERIFY**: a check, ideally outside the model, that can actually *fail* the work.
 
@@ -34,11 +36,12 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (9/9 baseline) |
 
 ## Quickstart
-**Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision.
+**Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision. Haven't read the skill? Just describe your task — it runs a six-question interview (does it recur? what would automatically prove a result wrong? what must it never touch?) and derives the rest.
 
-**Validate a spec:**
+**Validate & preview a spec:**
 ```
-python scripts/validate_loop_spec.py my-loop.json --render
+python scripts/validate_loop_spec.py my-loop.json --render     # the structured spec
+python scripts/validate_loop_spec.py my-loop.json --explain    # one plain-language sentence + earned autonomy
 ```
 Zero deps — uses `jsonschema` if installed, falls back to a built-in checker.
 
@@ -54,7 +57,13 @@ cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8
 - **Stop conditions** — success · a hard cap (iterations **and** budget) · no-progress detection. All three.
 - **Maker ≠ checker** — don't let the agent that did the work be its own only gate.
 
-**Autonomy is earned, not toggled.** A loop runs as unattended as it has *earned* — the validator computes the ceiling (L0 advise → L3 unattended) from its gate rung, budget, scope fence, output reversibility, and a proven manual pass, and refuses any request above it, naming what's missing. `--explain` prints a plain-language preview so a non-expert can sanity-check what it'll do before it runs.
+## Autonomy is earned, not toggled
+A loop runs only as unattended as it has *earned*. The validator computes the ceiling and refuses anything above it, naming what's missing:
+
+- **L0 · advise** — designs and previews, runs nothing
+- **L1 · propose & confirm** — does the work, stops at each decision point
+- **L2 · act with guardrails** — runs end-to-end, pauses only at irreversible / budget / no-progress
+- **L3 · unattended** — trigger, no human, reports after — *only* with a rung-1 gate on the deliverable, a scope fence, a budget cap, reversible output, and a proven manual pass
 
 ## Why trust any of this
 The load-bearing claims are sourced in [`references/evidence.md`](references/evidence.md): self-correction limits (Huang 2024), self-preference bias (Panickssery 2024), context rot (Liu/TACL 2024; Chroma & NoLiMa 2025), and verifiable rewards (Tulu 3; DeepSeek-R1). The named techniques ("Ralph," evaluator-optimizer, harnesses) are mostly blog-evidenced — so design from the principles, not the hype.
