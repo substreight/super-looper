@@ -32,7 +32,7 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
 | `src/super_looper/` | installable CLI + importable validator/compiler package |
-| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 64 tests |
+| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 68 tests |
 | `examples/` | worked loop specs + interview answer fixtures, including a Headroom case study |
 | `case-studies/` | public-target manifests and reports that show what autonomy level a real task actually earns |
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
@@ -62,6 +62,12 @@ super-looper explain my-loop.json
 super-looper max-autonomy my-loop.json --json
 ```
 Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`, otherwise falls back to a built-in checker. The old `python scripts/*.py` commands remain as compatibility wrappers.
+
+**Audit a repo for automation candidates, not auto-generated loops:**
+```
+super-looper repo audit --repo-path ../some-repo --out repo-audit
+```
+The audit writes `repo-audit.json`, `gate-inventory.json`, `repo-surfaces.json`, `automation-candidates.json`, `loop-hypotheses.json`, `ranked-backlog.md`, and `recommendations.md`. It inventories repo-native gates from CI workflows, `pyproject.toml`, `package.json`, Makefile, tox/nox, Rust, and Go metadata, maps gates to bounded repo surfaces such as workflows, test suites, docs/examples, and code-quality paths, then classifies candidates as `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate`. It also proposes clearly labeled loop hypotheses for plausible opportunities such as flaky CI triage, example smoke tests, integration drift, CLI contracts, release smoke checks, and performance watchpoints. Static audit never grants L3; it is discovery input for deciding whether autonomy is justified.
 
 **Run a real-repo case study:**
 ```

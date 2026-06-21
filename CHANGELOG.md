@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.4.0 — unreleased
+## 0.5.0 — 2026-06-21
+Repository automation discovery + loop hypotheses.
+
+- **Repo discovery:** added `super-looper repo audit` to inventory repo-native gates, rank automation candidates, and route each candidate to `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate` instead of auto-generating loops.
+- **Repo audit reports:** added machine-readable gate/candidate JSON plus `ranked-backlog.md` and `recommendations.md` outputs for sharing conservative automation findings with maintainers.
+- **Repo-specific surfaces:** added `repo-surfaces.json` and surface-linked candidates so audits can recommend bounded workflow/test-suite/code-quality opportunities instead of only whole-repo templates.
+- **Loop hypotheses:** added `loop-hypotheses.json` and report sections for creative but explicitly unproven opportunities such as flaky CI triage, example smoke tests, integration drift, CLI contracts, release smoke checks, and performance watchpoints.
+- **Automation allocator docs:** added `references/repo-discovery.md` and updated `SKILL.md`/`README.md` to position Super Looper as an agentic design linter and autonomy allocator before runtime loop design.
+
+## 0.4.0 — 2026-06-21
 Installable CLI package.
 
 - **Package layout:** moved validator and interview compiler logic into `src/super_looper/` with importable APIs and bundled schema resources.
@@ -12,7 +21,6 @@ Installable CLI package.
 - **Shadow verifiers:** added `case-study simulate-verifier` for proposing and running verifier tests from artifacts without modifying the target checkout; reports now distinguish shadow evidence from upstream verification.
 - **Verifier resolution:** added `case-study resolve-verifier`, which prefers confirmed repo-local gates and falls back to shadow verifiers by default; `--no-shadow` reports missing gates without generating proposals.
 - **Headroom example:** added a real-repo Headroom AST-compression loop design fixture, manifest, and write-up; it compiles to a clean L2 spec and documents why L3 is not yet earned.
-
 ## 0.3.0 — 2026-06-21
 Unknown-safe compiler + stricter autonomy enforcement.
 

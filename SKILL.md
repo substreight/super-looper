@@ -1,6 +1,6 @@
 ---
 name: loop-design
-description: Design clean, minimal agentic loops — and decide whether a loop is even warranted. Use this whenever someone wants to automate a recurring task with an AI agent, build a self-iterating or self-checking agent, set up a scheduled or event-triggered AI job, turn a manual prompt into something that runs itself, or asks about "loops," "agentic loops," the "Ralph" technique, harnesses, verifier/gate design, maker-checker or evaluator-optimizer setups, or why their autonomous agent spins, drifts, exits early, or burns tokens. Also use when the right answer is to NOT build a loop and use a single prompt or interactive session instead — qualifying that is a core job of this skill.
+description: Design clean, minimal agentic loops — and decide whether a loop is even warranted. Use this whenever someone wants to automate a recurring task with an AI agent, audit a repository for automation candidates, build a self-iterating or self-checking agent, set up a scheduled or event-triggered AI job, turn a manual prompt into something that runs itself, or asks about "loops," "agentic loops," the "Ralph" technique, harnesses, verifier/gate design, maker-checker or evaluator-optimizer setups, or why their autonomous agent spins, drifts, exits early, or burns tokens. Also use when the right answer is to NOT build a loop and use a single prompt or interactive session instead — qualifying that is a core job of this skill.
 ---
 
 # Loop Design
@@ -51,6 +51,8 @@ super-looper questions
 super-looper interview --answers examples/unknown-gate.answers.json
 super-looper interview --answers examples/ts-client.answers.json --out draft.loop.json
 ```
+
+**If the user points at a repository and asks what to automate, run discovery before design.** Use `super-looper repo audit --repo-path <repo> --out <audit-dir>` and treat the output as a ranked backlog: `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate`. Prefer candidates with `surface_id` because they are tied to bounded repo surfaces such as a CI workflow, test suite, docs/examples surface, or code-quality path. Use `loop-hypotheses.json` for creative possibilities, but keep `hypothesis: true` ideas in discovery until their proposed verifier is proven. Do not turn every candidate into a loop. Static repo audit inventories gates and allocates ceilings; it never grants L3.
 
 ## The anatomy of a clean loop
 
@@ -218,6 +220,7 @@ Prove it once, harden it, then automate. Recommend the lightweight portable loop
 - `references/state-and-verification.md` — fresh-restart vs compaction decision, and the verifier ladder rationale with the evidence on why self-verification is unreliable. Read when choosing an architecture or designing a gate.
 - `references/failure-modes.md` — the anti-patterns each missing part produces, how to detect them, and the fix. Read when diagnosing a loop that spins, drifts, exits early, or overspends.
 - `references/evidence.md` — verified citations for the skill's load-bearing empirical claims (self-correction, self-preference, context rot, verifiable rewards).
+- `references/repo-discovery.md` — conservative repository audit workflow for finding automation candidates, ranking them, and refusing bad loops before spec design.
 - `references/remote-runners.md` — secure remote VM/container runner policy for case studies that install dependencies or run untrusted setup code. Read before planning a dependency-installing case-study run.
 - `schemas/loop-spec.schema.json` — JSON Schema for a loop spec. The machine-checkable form of everything above.
 - `src/super_looper/` — installable package and `super-looper` CLI. The `scripts/*.py` files are compatibility wrappers.

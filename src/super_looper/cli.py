@@ -24,6 +24,7 @@ from .remote_runner import (
     build_remote_runner_plan,
     create_runner_key,
 )
+from .repo_audit import RepoAuditError, audit_repo, write_audit_outputs
 from .validate import max_autonomy, render, render_plain, validate
 
 
@@ -320,6 +321,51 @@ def cmd_runner_bootstrap_plan(args):
     return 0
 
 
+def cmd_repo_audit(args):
+    try:
+        result = audit_repo(args.repo_path, max_files=args.max_files)
+        outputs = write_audit_outputs(result, args.out) if args.out else {}
+    except RepoAuditError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        payload = dict(result)
+        if outputs:
+            payload["outputs"] = outputs
+        print(json.dumps(payload, indent=2))
+    else:
+        summary = result["summary"]
+        print("repo audit complete")
+        print(f"repo: {result['repo']['path']}")
+        print(
+            "gates: "
+            f"{summary['gate_counts']['strong']} strong, "
+            f"{summary['gate_counts']['medium']} medium, "
+            f"{summary['gate_counts']['weak']} weak"
+        )
+        print("candidates:")
+        for candidate in [item for item in result["automation_candidates"] if not item.get("hypothesis")][:8]:
+            print(
+                f"- {candidate['title']} "
+                f"[{candidate['recommended_path']}, max={candidate['max_agent_autonomy']}, "
+                f"gate={candidate['gate_strength']}, score={candidate['score']['total']}]"
+            )
+        hypotheses = [item for item in result["automation_candidates"] if item.get("hypothesis")]
+        if hypotheses:
+            print("hypotheses:")
+            for candidate in hypotheses[:5]:
+                print(
+                    f"- {candidate['title']} "
+                    f"[{candidate['recommended_path']}, max={candidate['max_agent_autonomy']}, "
+                    f"score={candidate['score']['total']}]"
+                )
+        if outputs:
+            print("outputs:")
+            for key, path in outputs.items():
+                print(f"- {key}: {path}")
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="super-looper", description="Design and validate agentic loop specs.")
     parser.add_argument("--version", action="version", version=f"super-looper {__version__}")
@@ -353,6 +399,16 @@ def build_parser():
     autonomy.add_argument("spec")
     autonomy.add_argument("--json", action="store_true", help="print structured JSON")
     autonomy.set_defaults(func=cmd_max_autonomy)
+
+    repo = sub.add_parser("repo", help="discover repo-native gates and automation candidates")
+    repo_sub = repo.add_subparsers(dest="repo_command", required=True)
+
+    repo_audit = repo_sub.add_parser("audit", help="rank conservative automation candidates for a local repository")
+    repo_audit.add_argument("--repo-path", required=True, help="local repository checkout to audit")
+    repo_audit.add_argument("--out", help="directory for repo-audit.json, gate inventory, surfaces, loop hypotheses, backlog, and recommendations")
+    repo_audit.add_argument("--max-files", type=int, default=50000, help="maximum repository files to index")
+    repo_audit.add_argument("--json", action="store_true", help="print full JSON audit")
+    repo_audit.set_defaults(func=cmd_repo_audit)
 
     case = sub.add_parser("case-study", help="create, run, and report real-repo loop case studies")
     case_sub = case.add_subparsers(dest="case_command", required=True)
