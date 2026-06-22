@@ -19,7 +19,7 @@ from super_looper.case_study import (  # noqa: E402
     design_case_study,
     resolve_verifier,
     run_case_study,
-    simulate_shadow_verifier,
+    simulate_sketch_verifier,
     verify_run,
 )
 
@@ -169,7 +169,7 @@ def test_case_study_scope_guard_sees_untracked_files():
         assert "docs/report.md" in run["summary"]["changed_files"], run
 
 
-def test_shadow_verifier_runs_without_modifying_checkout():
+def test_sketch_verifier_runs_without_modifying_checkout():
     with tempfile.TemporaryDirectory() as root:
         repo = os.path.join(root, "repo")
         os.makedirs(repo)
@@ -185,16 +185,16 @@ def test_shadow_verifier_runs_without_modifying_checkout():
         )
         _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
 
-        run = simulate_shadow_verifier(created["manifest_path"], repo, run_id="shadow-1")
-        assert run["summary"]["evidence_level"] == "shadow", run
-        assert run["summary"]["ready_for_shadow_report"], run
+        run = simulate_sketch_verifier(created["manifest_path"], repo, run_id="sketch-1")
+        assert run["summary"]["evidence_level"] == "sketch", run
+        assert run["summary"]["ready_for_sketch_report"], run
         assert not run["summary"]["ready_for_pr_claim"], run
-        assert os.path.exists(os.path.join(run["run_dir"], "shadow.patch"))
-        assert os.path.exists(os.path.join(run["run_dir"], "shadow-proposed", "tests", "test_transforms", "test_code_compressor_corpus.py"))
+        assert os.path.exists(os.path.join(run["run_dir"], "sketch.patch"))
+        assert os.path.exists(os.path.join(run["run_dir"], "sketch-proposed", "tests", "test_transforms", "test_code_compressor_corpus.py"))
         assert not os.path.exists(os.path.join(repo, "tests", "test_transforms", "test_code_compressor_corpus.py"))
 
 
-def test_shadow_verifier_respects_scope_before_running():
+def test_sketch_verifier_respects_scope_before_running():
     with tempfile.TemporaryDirectory() as root:
         repo = os.path.join(root, "repo")
         os.makedirs(repo)
@@ -210,10 +210,10 @@ def test_shadow_verifier_respects_scope_before_running():
         )
         _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
 
-        run = simulate_shadow_verifier(created["manifest_path"], repo, run_id="shadow-1")
+        run = simulate_sketch_verifier(created["manifest_path"], repo, run_id="sketch-1")
         assert not run["summary"]["scope_passed"], run
-        assert not run["summary"]["ready_for_shadow_report"], run
-        assert run["shadow_verifier"]["status"] == "shadow_failed", run
+        assert not run["summary"]["ready_for_sketch_report"], run
+        assert run["sketch_verifier"]["status"] == "sketch_failed", run
 
 
 def test_resolve_verifier_runs_confirmed_gate_when_path_exists():
@@ -239,7 +239,7 @@ def test_resolve_verifier_runs_confirmed_gate_when_path_exists():
         assert run["verifier_resolution"]["status"] == "confirmed_gate_found", run
 
 
-def test_resolve_verifier_defaults_to_shadow_when_declared_path_missing():
+def test_resolve_verifier_defaults_to_sketch_when_declared_path_missing():
     with tempfile.TemporaryDirectory() as root:
         repo = os.path.join(root, "repo")
         os.makedirs(repo)
@@ -257,14 +257,14 @@ def test_resolve_verifier_defaults_to_shadow_when_declared_path_missing():
         _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
 
         run = resolve_verifier(created["manifest_path"], repo, run_id="resolve-1")
-        assert run["summary"]["evidence_level"] == "shadow", run
+        assert run["summary"]["evidence_level"] == "sketch", run
         assert run["summary"]["claim_allowed"] == "proposal_only", run
         assert not run["summary"]["ready_for_pr_claim"], run
-        assert run["verifier_resolution"]["shadow_enabled"] is True, run
+        assert run["verifier_resolution"]["sketch_enabled"] is True, run
         assert run["verifier_resolution"]["missing_paths"] == ["tests/test_missing_corpus.py"], run
 
 
-def test_resolve_verifier_no_shadow_reports_missing_gate():
+def test_resolve_verifier_no_sketch_reports_missing_gate():
     with tempfile.TemporaryDirectory() as root:
         repo = os.path.join(root, "repo")
         os.makedirs(repo)
@@ -280,12 +280,44 @@ def test_resolve_verifier_no_shadow_reports_missing_gate():
         )
         _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
 
-        run = resolve_verifier(created["manifest_path"], repo, shadow=False, run_id="resolve-1")
+        run = resolve_verifier(created["manifest_path"], repo, sketch=False, run_id="resolve-1")
         assert run["summary"]["evidence_level"] == "missing", run
         assert run["summary"]["claim_allowed"] == "none", run
-        assert not run["summary"]["ready_for_shadow_report"], run
-        assert not os.path.exists(os.path.join(run["run_dir"], "shadow.patch"))
-        assert run["verifier_resolution"]["status"] == "declared_verifier_missing_shadow_disabled", run
+        assert not run["summary"]["ready_for_sketch_report"], run
+        assert not os.path.exists(os.path.join(run["run_dir"], "sketch.patch"))
+        assert run["verifier_resolution"]["status"] == "declared_verifier_missing_sketch_disabled", run
+
+
+def test_resolve_verifier_pathless_command_is_unconfirmed():
+    # #6: a declared verifier with no file-path token (e.g. `make check`, here a -c one-liner)
+    # is a real command we can't statically tie to a gate. Run it, but never call it proof.
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+
+        case_dir = os.path.join(root, "case")
+        created = create_manifest(
+            case_dir,
+            "https://example.test/repo.git",
+            verifier=[f'"{sys.executable}" -c "print(\'ok\')"'],
+            may_touch=["src/"],
+            must_not_touch=["secrets/"],
+            max_runtime_seconds=60,
+        )
+        _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
+
+        run = resolve_verifier(created["manifest_path"], repo, run_id="resolve-pathless")
+        assert run["summary"]["verifier_passed"], run            # the command ran and passed
+        assert run["summary"]["evidence_level"] == "unconfirmed", run
+        assert run["summary"]["claim_allowed"] == "declared_unverified", run
+        assert not run["summary"]["ready_for_pr_claim"], run     # a path-less gate is not PR-proof
+        assert run["verifier_resolution"]["status"] == "declared_verifier_unconfirmed", run
+
+
+def test_simulate_shadow_verifier_alias_still_importable():
+    # Back-compat: the old "shadow" name remains importable and is the renamed sketch function.
+    from super_looper.case_study import simulate_shadow_verifier, simulate_sketch_verifier
+    assert simulate_shadow_verifier is simulate_sketch_verifier
 
 
 def _run_all():

@@ -91,7 +91,7 @@ super-looper case-study report case-studies/headroom-ast-compression/runs/<run-i
 ```
 Case-study runs write `repo.json`, `loop.json`, `verifier-results.json`, `scope-check.json`, `diff.patch`, `summary.json`, and maintainer/PR markdown reports. The runner does not push or open PRs; it packages evidence so a human can decide whether to share a report or ship a patch.
 
-`resolve-verifier` is the normal integrated path: it runs the confirmed repo-local verifier when it exists; if the declared verifier is missing, it falls back to a **shadow verifier** by default. Use `--no-shadow` to disable that fallback and produce a missing-gate report instead. A passing shadow verifier means "this proposed gate appears viable," not "upstream is verified."
+`resolve-verifier` is the normal integrated path: it runs the confirmed repo-local verifier when its file exists; if the declared verifier names no real path token it still runs it but marks the evidence `unconfirmed`; if the declared verifier is missing entirely it falls back to a **verifier sketch** by default (`sketch-verifier`, alias `simulate-verifier`). Use `--no-sketch` (alias `--no-shadow`) to disable that fallback and produce a missing-gate report instead. A passing verifier sketch is a **proposal that appears viable — never proof that upstream is verified**, and neither a sketch nor an unconfirmed run can ever reach a PR-ready claim.
 
 **Prepare a secure remote VM runner before installing repo dependencies:**
 ```

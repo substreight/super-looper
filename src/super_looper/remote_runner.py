@@ -238,12 +238,15 @@ def _artifact_allowlist() -> List[str]:
         "diff.json",
         "diff.patch",
         "verifier-resolution.json",
+        "sketch-verifier.json",
+        "sketch.patch",
         "shadow-verifier.json",
         "shadow.patch",
         "report-maintainer.md",
         "report-pr.md",
         "*.stdout.txt",
         "*.stderr.txt",
+        "sketch-proposed/**",
         "shadow-proposed/**",
     ]
 

@@ -73,7 +73,7 @@ if execution.untrusted is not True and _looks_untrusted(spec):
 
 ---
 
-## 2.3 — Shadow verifiers → *sketches*, never proof  *(honesty fix · before quarantine · folds in #6 static half)*
+## 2.3 — Shadow verifiers → *sketches*, never proof ✅ DONE  *(honesty fix · folded in #6 static half · TDD)*
 
 **Goal:** a "shadow" result is a **verifier sketch / discovery artifact** — "this proposed gate appears viable," never "upstream verified."
 

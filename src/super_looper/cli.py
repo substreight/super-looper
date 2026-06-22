@@ -13,7 +13,7 @@ from .case_study import (
     render_report,
     resolve_verifier,
     run_case_study,
-    simulate_shadow_verifier,
+    simulate_sketch_verifier,
     verify_run,
     write_reports,
 )
@@ -185,7 +185,7 @@ def cmd_case_study_run(args):
 
 def cmd_case_study_simulate_verifier(args):
     try:
-        result = simulate_shadow_verifier(
+        result = simulate_sketch_verifier(
             args.manifest,
             args.repo_path,
             template=args.template,
@@ -196,7 +196,7 @@ def cmd_case_study_simulate_verifier(args):
         return 1
     print(json.dumps(result, indent=2))
     summary = result.get("summary", {})
-    if args.strict and not summary.get("ready_for_shadow_report"):
+    if args.strict and not summary.get("ready_for_sketch_report"):
         return 1
     return 0
 
@@ -207,7 +207,7 @@ def cmd_case_study_resolve_verifier(args):
             args.manifest,
             args.repo_path,
             template=args.template,
-            shadow=not args.no_shadow,
+            sketch=not args.no_sketch,
             run_id=args.run_id,
         )
     except CaseStudyError as exc:
@@ -216,8 +216,8 @@ def cmd_case_study_resolve_verifier(args):
     print(json.dumps(result, indent=2))
     summary = result.get("summary", {})
     if args.strict:
-        if summary.get("evidence_level") == "shadow":
-            return 0 if summary.get("ready_for_shadow_report") else 1
+        if summary.get("evidence_level") == "sketch":
+            return 0 if summary.get("ready_for_sketch_report") else 1
         return 0 if summary.get("ready_for_pr_claim") else 1
     return 0
 
@@ -474,20 +474,20 @@ def build_parser():
     case_run.add_argument("--strict", action="store_true", help="exit nonzero unless verifier and scope both pass")
     case_run.set_defaults(func=cmd_case_study_run)
 
-    case_shadow = case_sub.add_parser("simulate-verifier", help="generate and run a shadow verifier without modifying the checkout")
-    case_shadow.add_argument("manifest", help="case-study manifest path or directory")
-    case_shadow.add_argument("--repo-path", required=True, help="local checkout of the target repository")
-    case_shadow.add_argument("--template", default="python-ast-corpus", choices=["python-ast-corpus"], help="shadow verifier template")
-    case_shadow.add_argument("--run-id", help="stable run directory name; defaults to UTC timestamp")
-    case_shadow.add_argument("--strict", action="store_true", help="exit nonzero unless shadow verifier and scope both pass")
-    case_shadow.set_defaults(func=cmd_case_study_simulate_verifier)
+    case_sketch = case_sub.add_parser("sketch-verifier", aliases=["simulate-verifier"], help="generate and run a verifier SKETCH without modifying the checkout (proposal only, never proof)")
+    case_sketch.add_argument("manifest", help="case-study manifest path or directory")
+    case_sketch.add_argument("--repo-path", required=True, help="local checkout of the target repository")
+    case_sketch.add_argument("--template", default="python-ast-corpus", choices=["python-ast-corpus"], help="verifier sketch template")
+    case_sketch.add_argument("--run-id", help="stable run directory name; defaults to UTC timestamp")
+    case_sketch.add_argument("--strict", action="store_true", help="exit nonzero unless the verifier sketch and scope both pass")
+    case_sketch.set_defaults(func=cmd_case_study_simulate_verifier)
 
-    case_resolve = case_sub.add_parser("resolve-verifier", help="run confirmed verifier or fall back to shadow by default")
+    case_resolve = case_sub.add_parser("resolve-verifier", help="run the confirmed verifier or fall back to a verifier sketch by default")
     case_resolve.add_argument("manifest", help="case-study manifest path or directory")
     case_resolve.add_argument("--repo-path", required=True, help="local checkout of the target repository")
-    case_resolve.add_argument("--template", default="python-ast-corpus", choices=["python-ast-corpus"], help="shadow verifier template when fallback is needed")
+    case_resolve.add_argument("--template", default="python-ast-corpus", choices=["python-ast-corpus"], help="verifier sketch template when fallback is needed")
     case_resolve.add_argument("--run-id", help="stable run directory name; defaults to UTC timestamp")
-    case_resolve.add_argument("--no-shadow", action="store_true", help="do not generate a shadow verifier when the declared gate is missing")
+    case_resolve.add_argument("--no-sketch", "--no-shadow", action="store_true", help="do not generate a verifier sketch when the declared gate is missing")
     case_resolve.add_argument("--strict", action="store_true", help="exit nonzero unless the selected verifier path passes")
     case_resolve.set_defaults(func=cmd_case_study_resolve_verifier)
 
