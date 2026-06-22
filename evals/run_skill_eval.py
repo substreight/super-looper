@@ -83,7 +83,6 @@ def _anthropic_ask(model, max_tokens=1024):
         resp = client.messages.create(
             model=model,
             max_tokens=max_tokens,
-            temperature=0,
             system=system,
             messages=[{"role": "user", "content": user}],
         )

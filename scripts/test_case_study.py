@@ -299,7 +299,7 @@ def test_resolve_verifier_pathless_command_is_unconfirmed():
         created = create_manifest(
             case_dir,
             "https://example.test/repo.git",
-            verifier=[f'"{sys.executable}" -c "print(\'ok\')"'],
+            verifier=["echo ok"],   # a real command with NO path token, cross-platform (no .exe path)
             may_touch=["src/"],
             must_not_touch=["secrets/"],
             max_runtime_seconds=60,

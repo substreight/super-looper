@@ -28,6 +28,9 @@ jobs:
       - name: Run compiler tests
         run: python scripts/test_design_loop.py
 
+      - name: Install pytest (the case-study harness shells out to `python -m pytest` as a verifier)
+        run: python -m pip install pytest
+
       - name: Run case-study tests
         run: python scripts/test_case_study.py
 
