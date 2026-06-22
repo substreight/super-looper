@@ -67,8 +67,10 @@ super-looper lab repo audit --repo-path . --verify-gates
 ```
 
 `--verify-gates` runs discovered verifier commands and records whether each gate
-passed, failed, timed out, or was skipped. Candidates that rely on failed or
-unverified gates are downgraded; a static-looking gate is not treated as proof.
+passed, failed, timed out, was skipped, or could not be confirmed because the
+bare checkout needs tooling/setup/network (`tool_missing`, `setup_required`,
+`network_blocked`). Candidates that rely on failed or unverified gates are
+downgraded; a static-looking gate is not treated as proof.
 
 ## 5. Sanity-check the install
 
@@ -78,4 +80,3 @@ super-looper doctor
 
 `doctor` is offline. It reports the installed version, validator mode, example
 spec status, and whether any perimeter modules loaded in the process.
-

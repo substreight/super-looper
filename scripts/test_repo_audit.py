@@ -18,6 +18,7 @@ from super_looper.experimental.repo_audit import (  # noqa: E402
     render_ranked_backlog,
     verify_gate_inventory,
     _add_gate,
+    _classify_gate_failure,
     _classify_command,
     _consolidate_gates,
     _make_gate,
@@ -250,6 +251,33 @@ def test_verify_gate_inventory_records_pass_fail_and_skips_unsafe():
     assert strengths["gate-fail"] == "failed"
     assert by_id["gate-network"]["status"] == "skipped_requires_network"
     assert strengths["gate-network"] == "unverified"
+
+
+def test_classify_gate_failure_distinguishes_environment_from_real_failure():
+    assert _classify_gate_failure(
+        "nox -s tests",
+        stderr="'nox' is not recognized as an internal or external command",
+    ) == "tool_missing"
+    assert _classify_gate_failure(
+        "python -m nox -s lint",
+        stderr="No module named nox",
+    ) == "tool_missing"
+    assert _classify_gate_failure(
+        "npm test",
+        stderr="'xo' is not recognized as an internal or external command",
+    ) == "setup_required"
+    assert _classify_gate_failure(
+        "python -m pytest",
+        stderr="ERROR tests/test_app.py\nInterrupted: 2 errors during collection\nModuleNotFoundError: No module named 'flask'",
+    ) == "setup_required"
+    assert _classify_gate_failure(
+        "python -m build .",
+        stderr="HTTPSConnection(host='pypi.org', port=443): Failed to establish a new connection",
+    ) == "network_blocked"
+    assert _classify_gate_failure(
+        "python -m pytest",
+        stderr="FAILED tests/test_app.py::test_app - AssertionError",
+    ) == "failed"
 
 
 def test_repo_audit_verify_gates_confirms_discovered_pytest_gate():
