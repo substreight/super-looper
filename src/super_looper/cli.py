@@ -510,6 +510,9 @@ def cmd_repo_audit(args):
                 f"{counts.get('passed', 0)} passed, "
                 f"{counts.get('failed', 0)} failed, "
                 f"{counts.get('timeout', 0)} timed out, "
+                f"{counts.get('tool_missing', 0)} tool missing, "
+                f"{counts.get('setup_required', 0)} setup required, "
+                f"{counts.get('network_blocked', 0)} network blocked, "
                 f"{counts.get('skipped_requires_network', 0) + counts.get('skipped_destructive', 0)} skipped"
             )
         print("candidates:")

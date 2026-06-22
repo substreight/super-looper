@@ -587,11 +587,16 @@ def verify_gate_inventory(
                     timeout=timeout_seconds,
                 )
                 duration = round(time.monotonic() - started, 3)
+                stdout = completed.stdout or ""
+                stderr = completed.stderr or ""
+                status = "passed" if completed.returncode == 0 else _classify_gate_failure(command, stdout, stderr)
                 verification.update({
-                    "status": "passed" if completed.returncode == 0 else "failed",
+                    "status": status,
                     "exit_code": completed.returncode,
                     "duration_seconds": duration,
                 })
+                if completed.returncode != 0 and status != "failed":
+                    verification["raw_status"] = "failed"
                 if completed.stdout:
                     verification["stdout_tail"] = completed.stdout[-2000:]
                 if completed.stderr:
@@ -606,12 +611,16 @@ def verify_gate_inventory(
                 if exc.stderr:
                     verification["stderr_tail"] = str(exc.stderr)[-2000:]
             except OSError as exc:
+                status = _classify_gate_failure(command, error=str(exc))
                 verification.update({
-                    "status": "error",
+                    "status": status if status != "failed" else "error",
                     "error": str(exc),
                     "duration_seconds": round(time.monotonic() - started, 3),
                 })
+                if verification["status"] != "error":
+                    verification["raw_status"] = "error"
         item["verification"] = verification
+        item["confirmed_strength"] = _confirmed_gate_strength(item)
         verified.append(item)
     return verified
 
@@ -622,6 +631,182 @@ def _gate_verification_counts(gates: Sequence[Dict[str, Any]]) -> Dict[str, int]
         status = ((gate.get("verification") or {}).get("status")) or "not_run"
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _classify_gate_failure(command: str, stdout: str = "", stderr: str = "", error: str = "") -> str:
+    """Classify a nonzero verifier run.
+
+    A bare checkout often fails because the *environment* is not prepared
+    (missing nox/uv/npm deps/network), not because the checked repo is wrong.
+    Keep those unconfirmed instead of calling them proof that the gate failed.
+    """
+    text = "\n".join(str(part or "") for part in (command, stdout, stderr, error)).lower()
+    command_lower = (command or "").lower()
+
+    network_markers = (
+        "failed to establish a new connection",
+        "temporary failure in name resolution",
+        "unreachable network",
+        "network is unreachable",
+        "pypi.org",
+        "registry.npmjs.org",
+        "could not find a version that satisfies the requirement",
+        "no matching distribution found",
+    )
+    if any(marker in text for marker in network_markers):
+        return "network_blocked"
+
+    tool_markers = (
+        "is not recognized as an internal or external command",
+        "command not found",
+        "not found: command",
+        "no such file or directory",
+    )
+    if any(marker in text for marker in tool_markers):
+        # Missing script-local npm tools (xo/jest/vitest/tsc via npm scripts) are
+        # usually dependency setup, not a globally missing verifier.
+        if command_lower.startswith(("npm ", "pnpm ", "yarn ", "bun ")):
+            return "setup_required"
+        return "tool_missing"
+
+    module_match = re.search(r"no module named ['\"]?([a-z0-9_.-]+)['\"]?", text)
+    if module_match:
+        missing = module_match.group(1)
+        module_cmd = re.search(r"(?:^|\s)-m\s+([a-z0-9_.-]+)", command_lower)
+        if module_cmd and module_cmd.group(1) == missing:
+            return "tool_missing"
+        return "setup_required"
+
+    setup_markers = (
+        "cannot find module",
+        "module not found",
+        "modulenotfounderror",
+        "importerror",
+        "error collecting",
+        "interrupted:",
+        "npm error missing script",
+        "npm err! missing script",
+        "enoent",
+        "package-lock.json",
+        "node_modules",
+    )
+    if any(marker in text for marker in setup_markers):
+        return "setup_required"
+
+    return "failed"
+
+
+def _confirmed_gate_strength(gate: Dict[str, Any]) -> str:
+    """Strength after optional live verification.
+
+    Static discovery says a command *looks* strong/medium/weak. Verification says
+    whether it actually passed on this checkout. If no verification was attempted,
+    keep the distinction explicit as ``static_only`` rather than pretending it was
+    confirmed.
+    """
+    verification = gate.get("verification")
+    if not isinstance(verification, dict):
+        return "static_only"
+    status = verification.get("status")
+    if status == "passed":
+        return str(gate.get("strength") or "weak")
+    if status in {"failed", "timeout", "error"}:
+        return "failed"
+    if status in {"tool_missing", "setup_required", "network_blocked"}:
+        return "unverified"
+    if status and status.startswith("skipped"):
+        return "unverified"
+    return "unverified"
+
+
+def _candidate_verification_note(strength: str) -> str:
+    return {
+        "failed": "primary verifier command must pass before this candidate can be trusted",
+        "tool_missing": "primary verifier tool must be installed before this candidate can be trusted",
+        "setup_required": "project dependency/setup step is required before the primary verifier can be trusted",
+        "network_blocked": "network-enabled setup or a pre-populated dependency cache is required before this verifier can be trusted",
+        "unverified": "primary verifier command was not confirmed in this audit run",
+    }.get(strength, "primary verifier command was not confirmed in this audit run")
+
+
+def _score_with_gate(score: Dict[str, int], *, gate_value: int, extra_risk: int = 0) -> Dict[str, int]:
+    adjusted = dict(score)
+    adjusted["gate"] = gate_value
+    adjusted["risk_penalty"] = adjusted.get("risk_penalty", 0) + extra_risk
+    adjusted["total"] = max(
+        0,
+        min(
+            100,
+            adjusted.get("leverage", 0)
+            + adjusted.get("gate", 0)
+            + adjusted.get("effort", 0)
+            - adjusted.get("risk_penalty", 0),
+        ),
+    )
+    return adjusted
+
+
+def _apply_gate_verification_to_candidates(
+    candidates: Sequence[Dict[str, Any]],
+    gates: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Annotate/downgrade candidates with verified-gate evidence when available."""
+    gates_by_id = {gate["id"]: gate for gate in gates}
+    any_verified = any(isinstance(gate.get("verification"), dict) for gate in gates)
+    if not any_verified:
+        return list(candidates)
+
+    out: List[Dict[str, Any]] = []
+    rank = {"strong": 3, "medium": 2, "weak": 1, "none": 0}
+    hard_fail_statuses = {"failed", "timeout", "error"}
+    env_statuses = {"tool_missing", "setup_required", "network_blocked"}
+    for candidate in candidates:
+        item = dict(candidate)
+        primary = [gates_by_id[gate_id] for gate_id in item.get("primary_gates", []) if gate_id in gates_by_id]
+        if not primary:
+            item["confirmed_gate_strength"] = "none"
+            out.append(item)
+            continue
+
+        strengths = [_confirmed_gate_strength(gate) for gate in primary]
+        statuses = [((gate.get("verification") or {}).get("status")) or "not_run" for gate in primary]
+        gate_status = (
+            "failed" if any(status in hard_fail_statuses for status in statuses)
+            else "network_blocked" if "network_blocked" in statuses
+            else "setup_required" if "setup_required" in statuses
+            else "tool_missing" if "tool_missing" in statuses
+            else "unverified" if any(status != "passed" for status in statuses)
+            else "passed"
+        )
+        item["gate_verification_status"] = gate_status
+        item["confirmed_gate_strength"] = (
+            "failed" if "failed" in strengths
+            else "unverified" if "unverified" in strengths
+            else max(strengths, key=lambda value: rank.get(value, -1))
+        )
+        item["static_score"] = dict(item["score"])
+
+        if item["confirmed_gate_strength"] == "failed":
+            item["score"] = _score_with_gate(item["score"], gate_value=0, extra_risk=18)
+            item.setdefault("missing_evidence", [])
+            item["missing_evidence"] = [
+                *item["missing_evidence"],
+                "primary verifier command must pass before this candidate can be trusted",
+            ]
+            item.setdefault("why", [])
+            item["why"] = [
+                *item["why"],
+                "Verified-gate evidence downgraded this candidate: at least one primary gate failed, errored, or timed out.",
+            ]
+        elif item["confirmed_gate_strength"] == "unverified":
+            item["score"] = _score_with_gate(item["score"], gate_value=min(item["score"].get("gate", 0), 8), extra_risk=6)
+            item.setdefault("missing_evidence", [])
+            item["missing_evidence"] = [
+                *item["missing_evidence"],
+                _candidate_verification_note(gate_status),
+            ]
+        out.append(item)
+    return sorted(out, key=lambda row: (-row["score"]["total"], row["id"]))
 
 
 def _gate_ids(gates: Sequence[Dict[str, Any]], *, categories: Sequence[str] = (), strengths: Sequence[str] = (), limit: int = 4) -> List[str]:
@@ -1582,13 +1767,14 @@ def render_ranked_backlog(audit: Dict[str, Any]) -> str:
         "",
         "Static audit output is a conservative triage list. It does not grant unattended autonomy.",
         "",
-        "| Rank | Candidate | Path | Max Agent Autonomy | Gate | Score |",
-        "|---:|---|---|---|---|---:|",
+        "| Rank | Candidate | Path | Max Agent Autonomy | Static Gate | Confirmed Gate | Score |",
+        "|---:|---|---|---|---|---|---:|",
     ]
     for idx, candidate in enumerate(audit["automation_candidates"], start=1):
+        confirmed = candidate.get("confirmed_gate_strength", "not run")
         lines.append(
             f"| {idx} | {candidate['title']} | `{candidate['recommended_path']}` | "
-            f"`{candidate['max_agent_autonomy']}` | `{candidate['gate_strength']}` | {candidate['score']['total']} |"
+            f"`{candidate['max_agent_autonomy']}` | `{candidate['gate_strength']}` | `{confirmed}` | {candidate['score']['total']} |"
         )
     lines.extend(["", "## Details", ""])
     for candidate in audit["automation_candidates"]:
@@ -1598,6 +1784,8 @@ def render_ranked_backlog(audit: Dict[str, Any]) -> str:
             f"- Decision: `{candidate['recommended_path']}`",
             f"- Max agent autonomy: `{candidate['max_agent_autonomy']}`",
             f"- Gate strength: `{candidate['gate_strength']}`",
+            f"- Confirmed gate strength: `{candidate.get('confirmed_gate_strength', 'not run')}`",
+            f"- Gate verification status: `{candidate.get('gate_verification_status', 'not run')}`",
             f"- Evidence level: `{candidate['evidence_level']}`",
             f"- Surface: {candidate.get('surface_title', 'whole repo')}",
             f"- Primary gates: {', '.join('`' + gate + '`' for gate in candidate['primary_gates']) or 'none'}",
@@ -1717,6 +1905,7 @@ def audit_repo(
         )
     surfaces = infer_surfaces(str(repo), gates, files)
     candidates = build_candidates(str(repo), gates, files, surfaces=surfaces)
+    candidates = _apply_gate_verification_to_candidates(candidates, gates)
     traits = _repo_traits(repo, files, gates)
     audit = {
         "schema_version": 1,

@@ -40,6 +40,8 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer; CI runs the **actual skill** blind |
 
 ## Quickstart
+New here? Start with [`docs/first-five-minutes.md`](docs/first-five-minutes.md).
+
 **Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision. Haven't read the skill? Just describe your task — it runs a guided interview (does it recur? what would automatically prove a result wrong? what must it never touch?) and derives the rest.
 
 **Install the CLI:**
