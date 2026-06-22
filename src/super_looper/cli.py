@@ -95,6 +95,56 @@ def cmd_validate(args):
     return rc
 
 
+def cmd_run(args):
+    """Drive a validated loop's deterministic skeleton. The driver is pure; THIS handler
+    is the caller that owns the effects -- it runs your --propose/--verify shell commands
+    and persists state. super-looper does not own the model or the sandbox."""
+    import os as _os
+    import subprocess
+    from .runtime import FileStore, run_loop
+
+    spec = _load_json(args.spec)
+    errors, _warnings = validate(spec)
+    if errors:
+        print("ERROR: invalid loop spec; fix these before running:", file=sys.stderr)
+        for err in errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 1
+
+    def _shell(command, extra_env=None):
+        return subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            env={**_os.environ, **(extra_env or {})},
+        )
+
+    def propose(context):
+        completed = _shell(args.propose, {
+            "SUPER_LOOPER_ITERATION": str(context["iteration"]),
+            "SUPER_LOOPER_LAST_SIGNAL": context.get("last_signal") or "",
+        })
+        return completed.stdout.strip()
+
+    def verify(_change):
+        completed = _shell(args.verify)
+        tail = [ln for ln in completed.stderr.strip().splitlines() if ln.strip()]
+        signal = tail[-1] if tail else f"exit {completed.returncode}"
+        return {"passed": completed.returncode == 0, "signal": signal}
+
+    durable = (spec.get("state") or {}).get("durable_progress") or []
+    state_path = args.state or (durable[0] if durable else "super-looper-state.json")
+    result = run_loop(spec, propose=propose, verify=verify, store=FileStore(state_path))
+
+    print(json.dumps({
+        "reason": result.reason,
+        "success": result.success,
+        "iterations": result.iterations,
+        "kept": result.kept,
+        "state_file": state_path,
+        "history": result.history,
+    }, indent=2))
+    return 0 if result.success else 1
+
+
 def cmd_render(args):
     spec = _load_json(args.spec)
     errors, warnings = validate(spec)
@@ -418,6 +468,13 @@ def build_parser():
     autonomy.add_argument("spec")
     autonomy.add_argument("--json", action="store_true", help="print structured JSON")
     autonomy.set_defaults(func=cmd_max_autonomy)
+
+    run_cmd = sub.add_parser("run", help="drive a validated loop's deterministic skeleton (you supply the model and gate commands)")
+    run_cmd.add_argument("spec", help="path to a loop spec JSON")
+    run_cmd.add_argument("--propose", required=True, help="shell command for the model's propose step (gets SUPER_LOOPER_ITERATION / SUPER_LOOPER_LAST_SIGNAL in env)")
+    run_cmd.add_argument("--verify", required=True, help="shell command for the gate; exit 0 = pass")
+    run_cmd.add_argument("--state", help="durable state JSON file (default: spec.state.durable_progress[0])")
+    run_cmd.set_defaults(func=cmd_run)
 
     repo = sub.add_parser("repo", help="discover repo-native gates and automation candidates")
     repo_sub = repo.add_subparsers(dest="repo_command", required=True)

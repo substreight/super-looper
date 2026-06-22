@@ -93,6 +93,8 @@ if execution.untrusted is not True and _looks_untrusted(spec):
 
 ## 2.4 — Extract the deterministic loop *driver* (core); quarantine the rest  *(after 2.3 · folds in #7 · reverses red-team adj. #4)*
 
+> **Status:** ✅ **driver + #7 + `super-looper run` CLI done** (TDD: `runtime.py`, 7 driver tests; #7 fail-closed in `summarize_run`; `run` smoke-verified end-to-end). ⏳ **Remaining:** quarantine the `case_study` repo/diff/mini-CI harness into `experimental/` (the mechanical relocation — pairs with 2.2's lazy imports).
+
 **Goal:** the loop's deterministic control flow is the unique primitive — pull it out of the case-study harness (and out of any prompt) into a tiny **core** driver. The one place Phase 2 *adds* to the center; it's what "make the loop first-class" means.
 
 **New core module — `src/super_looper/runtime.py`:**

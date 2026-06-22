@@ -895,8 +895,8 @@ def summarize_run(run_dir: str) -> Dict[str, Any]:
         evidence_level = res_level                      # trust the verifier resolution
     elif is_sketch:
         evidence_level = "sketch"
-    elif verifier.get("skipped") is True:
-        evidence_level = "missing"
+    elif verifier.get("skipped") is True or not verifier:
+        evidence_level = "missing"          # #7: absent/partial run fails closed, never confirmed
     else:
         evidence_level = "confirmed_local"
     claim_allowed = {

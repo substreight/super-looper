@@ -314,6 +314,19 @@ def test_resolve_verifier_pathless_command_is_unconfirmed():
         assert run["verifier_resolution"]["status"] == "declared_verifier_unconfirmed", run
 
 
+def test_absent_run_dir_is_missing_evidence():
+    # #7: a run dir with no verifier results must fail closed to "missing", never "confirmed_local".
+    from super_looper.case_study import summarize_run
+    with open(os.path.join(ROOT, "examples", "nightly-export.loop.json")) as f:
+        loop = json.load(f)
+    with tempfile.TemporaryDirectory() as run_dir:
+        _write_json(os.path.join(run_dir, "loop.json"), loop)   # valid loop, but NO verifier-results.json
+        summary = summarize_run(run_dir)
+        assert summary["evidence_level"] == "missing", summary
+        assert summary["claim_allowed"] == "none", summary
+        assert not summary["ready_for_pr_claim"], summary
+
+
 def test_simulate_shadow_verifier_alias_still_importable():
     # Back-compat: the old "shadow" name remains importable and is the renamed sketch function.
     from super_looper.case_study import simulate_shadow_verifier, simulate_sketch_verifier
