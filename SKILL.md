@@ -74,6 +74,8 @@ Pick the highest rung the task allows. The gap between rungs is large.
 
 **Off the ladder: the maker grading its own work.** Self-checking is not a weak gate, it can be a *negative* one — without external feedback, self-correction frequently leaves output the same or worse, and seeing its own draft can make the model *less* calibrated about whether it's correct. Use self-scoring only as a drafting aid (Template 2), never as the gate for anything the model can be confidently wrong about.
 
+**Gate-gaming: a check the maker can satisfy by weakening the check isn't a gate.** "Make the suite green," "get the linter to pass," "no errors in the log" all invite the cheapest win — delete the failing test, add `# noqa`, silence the logger — instead of fixing the real thing. This doesn't make the loop a `REJECT_DESIGN`; it makes it a *guarded* loop: pin the gate to the **unmodified** check (the existing suite as-is) and **fence what the gate runs on** (`must_not_touch` the test files, the lint config, the threshold). Once pinned and fenced, "until the tests pass" is a clean rung-1 gate again — though for high-blast-radius targets (payments, prod, anything irreversible) keep a human at the merge step.
+
 ## State architecture — clean context per unit of work
 
 The single biggest mistake in naive loops is letting context accumulate: by iteration ten you're re-sending ten copies of the goal plus every prior tool result, which is both expensive and *quality-degrading* — recall drops as the context grows ("context rot"). The fix is not "trim a bit." It's to keep durable state outside the model and give each unit of work a clean-ish context. Two attested patterns:
