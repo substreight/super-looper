@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 — 2026-06-22
+The live skill gate goes on — plus the fixes and skill sharpening it immediately surfaced.
+
+- **The skill gate is live.** CI now runs the actual `SKILL.md` blind over the scenarios on Opus (push-to-`master` + nightly, secret-gated) and passes at **9/10**. The first real runs caught three CI bugs *and* one genuine skill improvement the old frozen eval never could.
+- **CI fixes:** drop the deprecated `temperature` arg (Opus 4.8 rejects it); install `pytest` for the case-study harness's subprocess gate; make the path-less verifier test cross-platform.
+- **Skill sharpening — gate-gaming:** a gate the maker can satisfy by *weakening the check* ("make the suite green" → delete the test) isn't a `REJECT_DESIGN`, it's a **guarded** loop — pin the gate to the *unmodified* check and fence the test files (`must_not_touch`). Added to `SKILL.md` and `references/failure-modes.md`.
+- **Eval calibration:** corrected over-precise answer keys the live run exposed — `DISCOVERY_REQUIRED` accepted for an unattended/no-gate task, the `fix-tests` scenario rewritten as a genuinely clean loop, and `REJECT_DESIGN` accepted for a subjective one-off.
+
 ## 0.6.0 — 2026-06-22
 **Back to center:** the loop as a deterministic primitive, an honest validator, and a relegated perimeter. See `SCOPE.md` for the north star — *determinism → code, judgment → the model, infrastructure → the environment.*
 
