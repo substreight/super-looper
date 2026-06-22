@@ -24,7 +24,7 @@ from .remote_runner import (
     build_remote_runner_plan,
     create_runner_key,
 )
-from .repo_audit import RepoAuditError, audit_repo, write_audit_outputs
+from .repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs
 from .validate import max_autonomy, render, render_plain, validate
 
 
@@ -366,6 +366,25 @@ def cmd_repo_audit(args):
     return 0
 
 
+def cmd_repo_promote(args):
+    try:
+        result = promote_candidate(
+            audit_path=args.audit,
+            candidate_id=args.candidate,
+            out_dir=args.out,
+            repo=args.repo,
+            issue=args.issue,
+            name=args.name,
+            max_runtime_seconds=args.max_runtime_seconds,
+            out_root=args.out_root,
+        )
+    except RepoAuditError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="super-looper", description="Design and validate agentic loop specs.")
     parser.add_argument("--version", action="version", version=f"super-looper {__version__}")
@@ -409,6 +428,24 @@ def build_parser():
     repo_audit.add_argument("--max-files", type=int, default=50000, help="maximum repository files to index")
     repo_audit.add_argument("--json", action="store_true", help="print full JSON audit")
     repo_audit.set_defaults(func=cmd_repo_audit)
+
+    repo_promote = repo_sub.add_parser(
+        "promote",
+        help="promote one audit candidate into a clean case-study proof packet",
+    )
+    repo_promote.add_argument("--audit", required=True, help="repo-audit.json written by repo audit")
+    repo_promote.add_argument("--candidate", required=True, help="candidate id from repo-audit.json")
+    repo_promote.add_argument("--out", help="exact directory for the promoted proof packet")
+    repo_promote.add_argument(
+        "--out-root",
+        default="case-studies",
+        help="root used when --out is omitted; writes <root>/<repo-slug>/<candidate-slug>",
+    )
+    repo_promote.add_argument("--repo", help="repository URL or owner/name to store in the case-study manifest")
+    repo_promote.add_argument("--issue", help="optional issue URL or identifier")
+    repo_promote.add_argument("--name", help="case-study manifest name")
+    repo_promote.add_argument("--max-runtime-seconds", type=int, default=1800, help="runtime budget for verifier runs")
+    repo_promote.set_defaults(func=cmd_repo_promote)
 
     case = sub.add_parser("case-study", help="create, run, and report real-repo loop case studies")
     case_sub = case.add_subparsers(dest="case_command", required=True)

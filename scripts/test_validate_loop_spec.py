@@ -355,6 +355,139 @@ def test_builtin_structural_rejects_bad_parallelism_type():
     assert any("execution.parallelism" in e and "integer" in e for e in errors), errors
 
 
+# ---- Fix 1.1: a taste/weasel gate cannot earn above L1 (gate quality caps the ceiling) ----
+
+def test_weasel_gate_caps_autonomy_at_l1():
+    # Structural boxes all ticked, but the gate is a taste judgment the maker can argue past.
+    s = _spec(verifier={"rung": "tool", "check": "the report looks good",
+                        "independent": True, "end_to_end": True})
+    level, missing = v.max_autonomy(s)
+    assert level == "L1", (level, missing)
+
+
+def test_weasel_gate_l3_request_is_refused():
+    s = _spec(verifier={"rung": "tool", "check": "the report looks good",
+                        "independent": True, "end_to_end": True},
+              autonomy={"requested": "L3", "output_reversibility": "reversible",
+                        "proven_manual_pass": True})
+    errors, _ = v.validate(s)
+    assert any("only earned L1" in e for e in errors), errors
+
+
+def test_measurable_tool_gate_still_earns_l3():
+    # Regression guard: the clean, measurable example must keep its L3 ceiling.
+    level, _ = v.max_autonomy(GOOD)
+    assert level == "L3", level
+
+
+# ---- Fix 1.2: the zero-dep checker rejects unknown/typo'd budget keys ----
+
+def test_builtin_rejects_typod_budget_key():
+    sc = copy.deepcopy(GOOD["stop_conditions"])
+    sc["budget"] = {"max_runtim_seconds": 1800}  # typo: missing the 'e' -> a silent no-op cap
+    errs = v._builtin_structural(_spec(stop_conditions=sc))
+    assert any("budget" in e and "max_runtim_seconds" in e for e in errs), errs
+
+
+def test_builtin_accepts_valid_budget_keys():
+    sc = copy.deepcopy(GOOD["stop_conditions"])
+    sc["budget"] = {"max_runtime_seconds": 1800, "max_tokens": 100000, "max_cost_usd": 5}
+    errs = v._builtin_structural(_spec(stop_conditions=sc))
+    assert not any("budget" in e for e in errs), errs
+
+
+# ---- 2.1: execution policy for untrusted code (untrusted-gated, run-gated) ----
+
+COHERENT_POLICY = {"host_credentials": "none",
+                   "network": {"setup": "on", "verification": "off"},
+                   "artifacts": "allowlist"}
+
+
+def _untrusted(policy=None, **over):
+    s = _spec(**over)
+    ex = {"untrusted": True}
+    if policy is not None:
+        ex["policy"] = policy
+    s["execution"] = ex
+    return s
+
+
+def test_untrusted_runs_without_policy_errors():
+    # GOOD is unattended + L3 -> will_run -> a missing policy is a hard error.
+    errors, _ = v.validate(_untrusted(policy=None))
+    assert any("untrusted" in e and "policy" in e for e in errors), errors
+
+
+def test_untrusted_l0_draft_without_policy_warns_only():
+    # No trigger + requested L0 -> won't run -> warning, not error.
+    s = _untrusted(policy=None, autonomy={"requested": "L0", "output_reversibility": "reversible"})
+    s.pop("trigger", None)
+    errors, warnings = v.validate(s)
+    assert not any("untrusted" in e for e in errors), errors
+    assert any("untrusted" in w and "policy" in w for w in warnings), warnings
+
+
+def test_untrusted_network_on_verification_errors():
+    bad = {"host_credentials": "none",
+           "network": {"setup": "on", "verification": "on"},
+           "artifacts": "allowlist"}
+    errors, _ = v.validate(_untrusted(policy=bad))
+    assert any("untrusted" in e and "policy" in e for e in errors), errors
+
+
+def test_untrusted_with_coherent_policy_validates():
+    errors, _ = v.validate(_untrusted(policy=COHERENT_POLICY))
+    assert not any(("untrusted" in e or "policy" in e) for e in errors), errors
+
+
+def test_trusted_with_untrusted_false_needs_no_policy():
+    s = _spec()
+    s["execution"] = {"untrusted": False}
+    errors, _ = v.validate(s)
+    assert not any(("untrusted" in e or "policy" in e) for e in errors), errors
+
+
+def test_looks_untrusted_nudge_warns():
+    s = _spec(iteration=[
+        "load durable context and progress from disk",
+        "git clone the target repo and run pip install -r requirements.txt",
+        "run the verifier and write progress back to disk",
+    ])
+    _, warnings = v.validate(s)
+    assert any("untrusted" in w for w in warnings), warnings
+
+
+def test_builtin_rejects_unknown_policy_key():
+    bad = {"host_credentials": "none",
+           "network": {"setup": "on", "verification": "off"},
+           "artifacts": "allowlist", "bogus": 1}
+    errs = v._builtin_structural(_untrusted(policy=bad))
+    assert any("policy" in e and "bogus" in e for e in errs), errs
+
+
+def test_builtin_rejects_unknown_policy_network_key():
+    bad = {"host_credentials": "none",
+           "network": {"setup": "on", "verification": "off", "bogus": 1},
+           "artifacts": "allowlist"}
+    errs = v._builtin_structural(_untrusted(policy=bad))
+    assert any("network" in e and "bogus" in e for e in errs), errs
+
+
+def test_schemas_in_sync():
+    a = os.path.join(HERE, "..", "schemas", "loop-spec.schema.json")
+    b = os.path.join(HERE, "..", "src", "super_looper", "resources", "loop-spec.schema.json")
+    with open(a, "rb") as f1, open(b, "rb") as f2:
+        assert f1.read() == f2.read(), "schemas/ and src/.../resources/ schema copies have drifted"
+
+
+def test_untrusted_suite_example_is_clean():
+    path = os.path.join(HERE, "..", "examples", "untrusted-suite.loop.json")
+    with open(path, encoding="utf-8") as f:
+        spec = json.load(f)
+    errors, _ = v.validate(spec)
+    assert errors == [], errors
+
+
 def _run_all():
     fns = sorted((n, fn) for n, fn in globals().items()
                  if n.startswith("test_") and callable(fn))

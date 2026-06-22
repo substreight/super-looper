@@ -3,6 +3,9 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * *"   # nightly 07:00 UTC: run the live skill gate
 
 jobs:
   test:
@@ -25,8 +28,20 @@ jobs:
       - name: Run compiler tests
         run: python scripts/test_design_loop.py
 
-      - name: Run behavioral eval
-        run: python evals/score_eval.py evals/scenarios.jsonl evals/results.example.jsonl --min 0.8
+      - name: Run case-study tests
+        run: python scripts/test_case_study.py
+
+      - name: Run remote-runner tests
+        run: python scripts/test_remote_runner.py
+
+      - name: Run repo-audit tests
+        run: python scripts/test_repo_audit.py
+
+      - name: Run skill-eval runner tests
+        run: python scripts/test_run_skill_eval.py
+
+      - name: Scorer self-test (frozen sample - NOT the skill gate)
+        run: python evals/score_eval.py evals/scenarios.jsonl evals/results.sample.jsonl --min 0.8
 
       - name: Install package
         run: python -m pip install .
@@ -38,3 +53,53 @@ jobs:
           super-looper explain examples/nightly-export.loop.json --validate --strict
           super-looper max-autonomy examples/nightly-export.loop.json --json
           super-looper interview --answers examples/unknown-gate.answers.json
+
+  skill-eval:
+    # The REAL skill gate: run SKILL.md blind over each scenario and score the LIVE output,
+    # so a regression in the skill's reasoning actually fails CI. Push-to-main + nightly + manual.
+    # Secret-gated: fork PRs (no secret access) and branch pushes are skipped cleanly, never failed.
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'schedule'
+      || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check for API key
+        id: guard
+        env:
+          HAVE_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          echo "have_key=$HAVE_KEY" >> "$GITHUB_OUTPUT"
+          [ "$HAVE_KEY" = "true" ] || echo "::notice::ANTHROPIC_API_KEY not set; skipping the live skill eval."
+
+      - name: Install eval deps
+        if: steps.guard.outputs.have_key == 'true'
+        run: python -m pip install .[eval]
+
+      - name: Run the skill blind over each scenario
+        if: steps.guard.outputs.have_key == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python evals/run_skill_eval.py \
+            --skill SKILL.md \
+            --scenarios evals/scenarios.jsonl \
+            --out results.live.jsonl \
+            --model claude-opus-4-8
+
+      - name: Score the live skill run (the gate)
+        if: steps.guard.outputs.have_key == 'true'
+        run: python evals/score_eval.py evals/scenarios.jsonl results.live.jsonl --min 0.8
+
+      - name: Upload live results
+        if: steps.guard.outputs.have_key == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-eval-results
+          path: results.live.jsonl

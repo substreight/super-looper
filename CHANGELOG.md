@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - unreleased
+Candidate promotion proof packets.
+
+- **Repo candidate promotion:** added `super-looper repo promote` to turn one audit candidate into a case-study proof packet.
+- **Clean taxonomy:** promotion writes `case-study.json`, `inputs/`, `design/`, `proof/`, and `reports/` with stable names for downstream review, remote runs, and maintainer sharing.
+- **Safe hypothesis handling:** creative repo hypotheses remain discovery packets and intentionally do not receive `design/loop.json` until verifier evidence exists.
+- **Default naming convention:** when `--out` is omitted, promotion writes to `case-studies/<repo-slug>/<candidate-slug>/`; `--out-root` keeps the convention under a different root.
+- **Gate-only hardening:** repair candidates found from static repo files now stay `discovery_required` with `static_gate_only` evidence until failing lint/typecheck output, a real failing check, repeated failure signature, dependency-bump failure, flaky-test history, or maintainer task proves there is an actionable loop.
+
 ## 0.5.0 — 2026-06-21
 Repository automation discovery + loop hypotheses.
 

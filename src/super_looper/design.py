@@ -31,10 +31,14 @@ VERDICTS = {
 QUESTIONS = [
     ("task", "What task should run?"),
     ("recurs", "Does it recur at least weekly? (yes/no/unknown)"),
+    ("deterministic_without_llm", "Could a fixed script plus the gate do this without model judgment? (yes/no)"),
     ("wrong_result_signal", "What would automatically prove a result wrong?"),
+    ("self_grading", "Would the loop grade its own output with no external check? (yes/no)"),
+    ("agent_can_do_end_to_end", "Can the agent finish the whole task end-to-end without handing work back? (yes/no)"),
     ("finished_state", "What finished state should be true?"),
     ("may_touch", "What may it read or edit? (comma-separated)"),
     ("must_not_touch", "What must it never touch? (comma-separated)"),
+    ("unattended", "Should it run unattended, with no human in the loop each run? (yes/no)"),
     ("output_reversibility", "Is the output reversible, outward_facing, or irreversible?"),
     ("budget", "What is the max spend/runtime per run?"),
 ]
@@ -229,7 +233,8 @@ def classify_answers(answers):
             "alternative": "Generate drafts or PRs, then require human approval before publish/write/delete.",
         }
 
-    if answers.get("agent_can_do_end_to_end") is False:
+    answered_end_to_end = answers.get("agent_can_do_end_to_end")
+    if not _unknown(answered_end_to_end) and not _truthy(answered_end_to_end):
         return {
             "verdict": "HUMAN_IN_LOOP",
             "autonomy": "L1",
@@ -238,7 +243,19 @@ def classify_answers(answers):
             "alternative": "Automate the checkable sub-step and keep the rest interactive.",
         }
 
-    rung = answers.get("gate_rung") or ("tool" if MEASURABLE.search(gate) else "independent_model")
+    explicit_rung = _string(answers.get("gate_rung"))
+    if explicit_rung:
+        rung = explicit_rung
+    elif MEASURABLE.search(gate):
+        rung = "tool"
+    else:
+        # A grammatical but non-measurable gate with no explicit checker named is not
+        # concrete enough to mint an autonomous loop. Treat it like "I don't know":
+        # gather evidence and name a gate that can actually fail the work.
+        return unknown_report(answers, [
+            "A concrete gate that can actually fail the work: name a tool/threshold/exit "
+            "check, or set gate_rung to an explicit independent checker. "
+            f"{gate!r} has no measurable signal, so automating against it would be guessing."])
     report = {
         "verdict": "AUTONOMOUS_LOOP",
         "autonomy": "L2",
@@ -280,7 +297,7 @@ def build_spec(answers):
         and unattended
         and reversibility == "reversible"
         and proven_manual
-        and _truthy(answers.get("end_to_end", True))
+        and _truthy(answers.get("end_to_end", False))
     ):
         requested = "L3"
 
@@ -312,7 +329,7 @@ def build_spec(answers):
             "rung": rung,
             "check": gate,
             "independent": rung in {"tool", "independent_model"},
-            "end_to_end": _truthy(answers.get("end_to_end", rung == "tool")),
+            "end_to_end": _truthy(answers.get("end_to_end", False)),
         },
         "state": {
             "architecture": answers.get("state_architecture") or "fresh_restart",

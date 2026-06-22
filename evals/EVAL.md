@@ -8,7 +8,7 @@ Whether a fresh agent, given only the skill and a request (blind to the answer),
 ## Run it
 1. For each scenario in `scenarios.jsonl`, start a **fresh agent** (clean context, blind to the expected verdict). Give it the skill (point it at `SKILL.md` + `references/`) and the scenario `prompt`. Ask it to apply the skill and answer in exactly:
    ```
-   VERDICT: <AUTONOMOUS_LOOP | NOT_A_LOOP | HUMAN_IN_LOOP | USE_SCHEDULER | REJECT_DESIGN>
+   VERDICT: <AUTONOMOUS_LOOP | DISCOVERY_REQUIRED | HUMAN_IN_LOOP | NOT_A_LOOP | REJECT_DESIGN | USE_SCHEDULER>
    RATIONALE: <2-4 sentences grounded in the skill>
    ```
    Independence matters — blind makers, fresh context per scenario. This mirrors the verifier ladder: don't let the thing being judged grade itself.
@@ -29,12 +29,19 @@ Whether a fresh agent, given only the skill and a request (blind to the answer),
 ## Deeper check (optional)
 For reasoning *quality*, not just the verdict, have a **different model family** judge each result against the rubric — given the artifact and criteria but **not** the maker's justification (rung 2 from `state-and-verification.md`, applied to the skill itself).
 
-## Baseline & example
-`results.example.jsonl` holds the current baseline verdicts. Reproduce the baseline:
+## Baseline & sample
+`results.sample.jsonl` is a **recorded** sample run. It is used only as a self-test of the deterministic scorer — being frozen, it cannot catch a skill regression. Reproduce it:
 ```
-python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 10/10
+python score_eval.py scenarios.jsonl results.sample.jsonl --min 0.8   # -> 10/10
 ```
 `baseline.json` records that run.
+
+## Automated (CI): the live gate
+`run_skill_eval.py` runs the **actual** skill blind over every scenario (fresh context each, answer key withheld) and writes a fresh results file to score. This — not the frozen sample — is the gate that can fail a skill regression. CI runs it on push-to-main, nightly, and on demand (Opus, secret-gated so fork PRs skip cleanly):
+```
+python evals/run_skill_eval.py --skill SKILL.md --scenarios evals/scenarios.jsonl --out results.live.jsonl --model claude-opus-4-8
+python evals/score_eval.py evals/scenarios.jsonl results.live.jsonl --min 0.8
+```
 
 ## Extending the set
 Add scenarios that probe a specific claim. Good next additions:

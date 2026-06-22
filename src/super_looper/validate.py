@@ -93,6 +93,36 @@ def _d(x):
     return x if isinstance(x, dict) else {}
 
 
+# Conservative signals that a loop runs third-party code (so it should declare execution.untrusted).
+# Deliberately narrow -- dependency-install / external-clone, NOT merely "runs tests" (your own tests
+# are trusted), to avoid nagging trusted in-repo loops.
+_UNTRUSTED_HINTS = (
+    "pip install", "pip3 install", "uv pip", "poetry install", "npm install", "npm ci",
+    "yarn install", "pnpm install", "bundle install", "gem install", "cargo build",
+    "cargo install", "go install", "git clone", "make install", "postinstall", "npx ",
+)
+
+
+def _coherent_policy(policy):
+    """An execution policy is coherent iff it actually isolates: no host credentials,
+    no network during the graded run, and only allowlisted artifacts copied back."""
+    policy = _d(policy)
+    net = _d(policy.get("network"))
+    return (policy.get("host_credentials") == "none"
+            and net.get("verification") == "off"
+            and policy.get("artifacts") == "allowlist")
+
+
+def _looks_untrusted(spec):
+    spec = _d(spec)
+    blobs = [s.lower() for s in (spec.get("iteration") or []) if isinstance(s, str)]
+    check = _d(spec.get("verifier")).get("check")
+    if isinstance(check, str):
+        blobs.append(check.lower())
+    text = " ".join(blobs)
+    return any(hint in text for hint in _UNTRUSTED_HINTS)
+
+
 _AUTONOMY_ORDER = ["L0", "L1", "L2", "L3"]
 
 
@@ -119,6 +149,16 @@ def max_autonomy(spec):
         return "L1", ["a real gate (verifier.rung 'tool' or 'independent_model' — self/none can't run unsupervised)"]
     if rung == "human":
         return "L1", ["an automatic gate (a human gate is human-in-the-loop by definition)"]
+
+    # A taste/weasel gate can't license unattended autonomy: the maker can argue its way
+    # past it, so it won't reliably fail bad work. Gate quality stays advisory (a warning)
+    # at L0/L1, but here -- where autonomy is on the line -- it caps the earned ceiling.
+    check = verifier.get("check") or ""
+    end_state = _d(spec.get("goal")).get("end_state") or ""
+    weasel = _weasel(check) or _weasel(end_state)
+    if weasel:
+        return "L1", [f"a gate that isn't a taste judgment ({weasel!r}); state it so a tool or a "
+                      "different model can decide it (exit code, threshold, schema, match)"]
 
     # rung is 'tool' or 'independent_model': L2 is reachable only with guardrails.
     l2_missing = []
@@ -155,6 +195,10 @@ ENUMS = {
     ("state", "architecture"): ["fresh_restart", "compaction"],
     ("trigger", "type"): ["schedule", "event", "manual"],
     ("execution", "isolation"): ["none", "worktree", "sandbox"],
+    ("execution", "policy", "host_credentials"): ["none", "scoped"],
+    ("execution", "policy", "artifacts"): ["allowlist", "all"],
+    ("execution", "policy", "network", "setup"): ["on", "off"],
+    ("execution", "policy", "network", "verification"): ["on", "off"],
     ("economics", "billing"): ["prepaid", "metered", "unknown"],
     ("autonomy", "requested"): ["L0", "L1", "L2", "L3"],
     ("autonomy", "output_reversibility"): ["reversible", "outward_facing", "irreversible"],
@@ -312,6 +356,11 @@ def _builtin_structural(spec):
             if not isinstance(budget, dict) or not budget:
                 errors.append("stop_conditions.budget must be a non-empty object")
             else:
+                allowed_budget = ("max_tokens", "max_runtime_seconds", "max_cost_usd")
+                for bad_key in (k for k in budget if k not in allowed_budget):
+                    errors.append(
+                        f"stop_conditions.budget has unknown key {bad_key!r} "
+                        f"(allowed: {list(allowed_budget)}). A misspelled cap is silently no cap.")
                 for key in ("max_tokens", "max_runtime_seconds"):
                     if key in budget:
                         expect_int(budget, ("stop_conditions", "budget", key), minimum=1)
@@ -330,6 +379,21 @@ def _builtin_structural(spec):
     if execution is not None:
         expect_int(execution, ("execution", "parallelism"), minimum=1)
         expect_str(execution, ("execution", "isolation"))
+        expect_bool(execution, ("execution", "untrusted"))
+        policy = expect_obj(("execution", "policy"))
+        if policy is not None:
+            for bad in (k for k in policy if k not in ("host_credentials", "network", "artifacts")):
+                errors.append(f"execution.policy has unknown key {bad!r} "
+                              "(allowed: ['artifacts', 'host_credentials', 'network']).")
+            expect_str(policy, ("execution", "policy", "host_credentials"))
+            expect_str(policy, ("execution", "policy", "artifacts"))
+            net = expect_obj(("execution", "policy", "network"))
+            if net is not None:
+                for bad in (k for k in net if k not in ("setup", "verification")):
+                    errors.append(f"execution.policy.network has unknown key {bad!r} "
+                                  "(allowed: ['setup', 'verification']).")
+                expect_str(net, ("execution", "policy", "network", "setup"))
+                expect_str(net, ("execution", "policy", "network", "verification"))
 
     economics = expect_obj(("economics",))
     if economics is not None:
@@ -482,6 +546,22 @@ def _semantic(spec):
     if _tokens(sc.get("success")) and _tokens(end_state) and not (_tokens(sc.get("success")) & _tokens(end_state)):
         warnings.append("stop_conditions.success shares no term with goal.end_state. The success exit and the "
                         "goal should name the same finish line.")
+
+    # Untrusted execution must declare a coherent isolation policy before it can run.
+    # super-looper validates the requirement; the user's own sandbox enforces it -- it is
+    # an error once the loop will actually run (>= L1 or a trigger), a warning at L0.
+    requested_level = _d(spec.get("autonomy")).get("requested")
+    will_run = (requested_level in ("L1", "L2", "L3")) or bool(trigger.get("type")) or unattended
+    if execution.get("untrusted") is True:
+        if not _coherent_policy(execution.get("policy")):
+            msg = ("execution.untrusted is true but there's no coherent isolation policy "
+                   "(execution.policy needs host_credentials='none', network.verification='off', "
+                   "artifacts='allowlist'). super-looper doesn't run the loop -- declare where it "
+                   "runs safely and hand the spec to your own isolated runner.")
+            (errors if will_run else warnings).append(msg)
+    elif _looks_untrusted(spec):
+        warnings.append("this loop appears to install or run third-party code; set "
+                        "execution.untrusted and declare an isolation policy (execution.policy) if so.")
 
     # Autonomy dial: the requested level must not exceed what the loop has earned.
     requested = _d(spec.get("autonomy")).get("requested")

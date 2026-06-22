@@ -198,10 +198,29 @@
     "execution": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Concurrency and isolation. Relevant once more than one agent runs.",
+      "description": "Concurrency, isolation, and (for untrusted code) the execution policy your own infrastructure must enforce. super-looper validates the policy; it never runs the loop or owns the sandbox.",
       "properties": {
         "parallelism": {"type": "integer", "minimum": 1, "default": 1},
-        "isolation": {"type": "string", "enum": ["none", "worktree", "sandbox"], "description": "Per-agent private checkout. Required once parallelism > 1 to avoid parallel clobber."}
+        "isolation": {"type": "string", "enum": ["none", "worktree", "sandbox"], "description": "Per-agent private checkout. Required once parallelism > 1 to avoid parallel clobber."},
+        "untrusted": {"type": "boolean", "description": "True if the loop runs third-party code (installs deps, runs a repo's build/test). Requires a coherent execution.policy before it may run."},
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Machine-checkable isolation requirements for untrusted execution. super-looper requires these; the user's VPS/devcontainer/CI enforces them.",
+          "properties": {
+            "host_credentials": {"type": "string", "enum": ["none", "scoped"], "description": "Credentials available to the run. A coherent policy requires 'none'."},
+            "network": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Network access by phase. Setup may need network to install deps; the graded verification run must be offline.",
+              "properties": {
+                "setup": {"type": "string", "enum": ["on", "off"]},
+                "verification": {"type": "string", "enum": ["on", "off"], "description": "A coherent policy requires 'off'."}
+              }
+            },
+            "artifacts": {"type": "string", "enum": ["allowlist", "all"], "description": "What is copied back from the run. A coherent policy requires 'allowlist'."}
+          }
+        }
       }
     },
     "economics": {

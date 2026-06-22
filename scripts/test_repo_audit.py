@@ -12,7 +12,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from super_looper.cli import main as cli_main  # noqa: E402
-from super_looper.repo_audit import audit_repo  # noqa: E402
+from super_looper.repo_audit import audit_repo, default_promotion_out_dir  # noqa: E402
 
 
 def _write(root, rel, text):
@@ -27,6 +27,47 @@ def _candidate(audit, cid):
         if item["id"] == cid:
             return item
     raise AssertionError(f"missing candidate: {cid}")
+
+
+def _write_promotable_repo(repo):
+    _write(repo, "src/pkg/__init__.py", "")
+    _write(repo, "src/pkg/app.py", "def ok():\n    return 1\n")
+    _write(repo, "tests/test_pkg.py", "def test_pkg():\n    assert True\n")
+    _write(repo, "pyproject.toml", "[tool.pytest.ini_options]\naddopts = '-q'\n[tool.ruff]\nline-length = 100\n")
+    _write(
+        repo,
+        ".github/workflows/tests.yml",
+        "jobs:\n"
+        "  test:\n"
+        "    steps:\n"
+        "      - run: python -m pytest tests\n",
+    )
+
+
+def _confirmed_l2_candidate(gate_id):
+    return {
+        "id": "confirmed-lint-failure-repair",
+        "title": "Repair confirmed lint failure in src/",
+        "recommended_path": "l2_candidate",
+        "max_agent_autonomy": "L2",
+        "gate_strength": "medium",
+        "evidence_level": "confirmed_failure",
+        "hypothesis": False,
+        "score": {"total": 70, "leverage": 28, "gate": 28, "effort": 18, "risk_penalty": 4},
+        "why": [
+            "A concrete failing lint command output was captured.",
+            "The repair is bounded to src/ and checked by the same lint gate.",
+        ],
+        "primary_gates": [gate_id],
+        "proposed_verifiers": [],
+        "scope_hint": {
+            "may_touch": ["src/"],
+            "must_not_touch": [".github/workflows/", "release configuration", "credentials"],
+        },
+        "missing_evidence": [],
+        "discovery_questions": [],
+        "next_step": "Run one watched repair pass, then share the patch only if the lint gate passes.",
+    }
 
 
 def test_python_repo_discovers_native_gates_and_conservative_candidates():
@@ -72,12 +113,21 @@ def test_python_repo_discovers_native_gates_and_conservative_candidates():
     assert any(surface["title"] == "workflow `.github/workflows/ci.yml`" for surface in audit["repo_surfaces"])
 
     ci = _candidate(audit, "ci-failure-repair-assistant")
-    assert ci["recommended_path"] == "l2_candidate"
-    assert ci["max_agent_autonomy"] == "L2"
-    assert "one proven manual pass" in " ".join(ci["missing_evidence"])
+    assert ci["recommended_path"] == "discovery_required"
+    assert ci["max_agent_autonomy"] == "L0"
+    assert ci["evidence_level"] == "static_gate_only"
+    assert "failing CI log" in " ".join(ci["missing_evidence"])
     surface_candidates = [candidate for candidate in audit["automation_candidates"] if candidate.get("surface_id")]
     assert any(candidate["surface_id"].startswith("ci-workflow") for candidate in surface_candidates)
     assert any("workflow `.github/workflows/ci.yml`" in candidate["title"] for candidate in surface_candidates)
+    surface_ci = next(candidate for candidate in surface_candidates if candidate["surface_id"].startswith("ci-workflow"))
+    assert surface_ci["recommended_path"] == "discovery_required"
+    assert surface_ci["evidence_level"] == "static_gate_only"
+    assert all(
+        candidate["recommended_path"] != "l2_candidate"
+        for candidate in audit["automation_candidates"]
+        if candidate["evidence_level"] == "static_gate_only"
+    )
     assert audit["summary"]["hypothesis_count"] >= 4
     hypotheses = [candidate for candidate in audit["automation_candidates"] if candidate["hypothesis"]]
     assert all(candidate["evidence_level"] == "hypothesis" for candidate in hypotheses)
@@ -155,6 +205,148 @@ def test_repo_audit_writes_reviewable_artifacts_and_cli_summary():
 
     assert audit["mode"] == "repo-automation-discovery"
     assert audit["automation_candidates"][0]["score"]["total"] >= audit["automation_candidates"][-1]["score"]["total"]
+
+
+def test_repo_promote_writes_clean_case_study_taxonomy_for_static_candidate():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        audit_dir = os.path.join(root, "audit")
+        promote_dir = os.path.join(root, "promotions", "pkg-tests")
+        os.makedirs(repo)
+        _write_promotable_repo(repo)
+
+        assert cli_main(["repo", "audit", "--repo-path", repo, "--out", audit_dir]) == 0
+        with open(os.path.join(audit_dir, "repo-audit.json"), encoding="utf-8") as f:
+            audit = json.load(f)
+        lint_gate = next(gate for gate in audit["gate_inventory"] if gate["command"] == "ruff check .")
+        candidate = _confirmed_l2_candidate(lint_gate["id"])
+        audit["automation_candidates"].insert(0, candidate)
+        with open(os.path.join(audit_dir, "repo-audit.json"), "w", encoding="utf-8") as f:
+            json.dump(audit, f, indent=2)
+            f.write("\n")
+
+        rc = cli_main([
+            "repo",
+            "promote",
+            "--audit",
+            os.path.join(audit_dir, "repo-audit.json"),
+            "--candidate",
+            candidate["id"],
+            "--out",
+            promote_dir,
+            "--repo",
+            "https://example.test/org/pkg",
+            "--name",
+            "pkg-tests-promotion",
+        ])
+
+        assert rc == 0
+        expected = (
+            "case-study.json",
+            "inputs/audit-summary.json",
+            "inputs/candidate.json",
+            "inputs/answers.json",
+            "inputs/promotion.json",
+            "design/loop.json",
+            "design/design-report.json",
+            "proof/verifier-plan.md",
+            "proof/scope.md",
+            "proof/runner-plan.md",
+            "proof/runs",
+            "reports/maintainer-brief.md",
+            "reports/promotion-summary.md",
+        )
+        for rel in expected:
+            assert os.path.exists(os.path.join(promote_dir, *rel.split("/"))), rel
+
+        with open(os.path.join(promote_dir, "case-study.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        assert manifest["name"] == "pkg-tests-promotion"
+        assert manifest["repo"] == "https://example.test/org/pkg"
+        assert manifest["answers"] == "inputs/answers.json"
+        assert manifest["loop_spec"] == "design/loop.json"
+        assert manifest["design_report"] == "design/design-report.json"
+        assert manifest["runs_dir"] == "proof/runs"
+        assert manifest["promotion"] == "inputs/promotion.json"
+
+        with open(os.path.join(promote_dir, "inputs", "promotion.json"), encoding="utf-8") as f:
+            promotion = json.load(f)
+        assert promotion["mode"] == "repo-candidate-promotion"
+        assert promotion["proof_status"] == "case_study_ready"
+        assert promotion["design_verdict"] == "AUTONOMOUS_LOOP"
+        assert promotion["taxonomy"]["root"] == ["case-study.json"]
+        assert promotion["taxonomy"]["inputs"] == [
+            "audit-summary.json",
+            "candidate.json",
+            "answers.json",
+            "promotion.json",
+        ]
+        assert "runner-plan.md" in promotion["taxonomy"]["proof"]
+        assert "maintainer-brief.md" in promotion["taxonomy"]["reports"]
+        with open(os.path.join(promote_dir, "reports", "maintainer-brief.md"), encoding="utf-8") as f:
+            maintainer_brief = f.read()
+        assert "Repository: `https://example.test/org/pkg`" in maintainer_brief
+
+        auto_root = os.path.join(root, "auto-promotions")
+        auto_expected = default_promotion_out_dir(
+            os.path.join(audit_dir, "repo-audit.json"),
+            candidate["id"],
+            out_root=auto_root,
+            repo="https://example.test/org/pkg",
+        )
+        rc = cli_main([
+            "repo",
+            "promote",
+            "--audit",
+            os.path.join(audit_dir, "repo-audit.json"),
+            "--candidate",
+            candidate["id"],
+            "--out-root",
+            auto_root,
+            "--repo",
+            "https://example.test/org/pkg",
+        ])
+        assert rc == 0
+        assert os.path.exists(os.path.join(auto_expected, "case-study.json"))
+
+
+def test_repo_promote_keeps_hypotheses_as_discovery_packets():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        audit_dir = os.path.join(root, "audit")
+        promote_dir = os.path.join(root, "promotions", "hypothesis")
+        os.makedirs(repo)
+        _write_promotable_repo(repo)
+
+        assert cli_main(["repo", "audit", "--repo-path", repo, "--out", audit_dir]) == 0
+        with open(os.path.join(audit_dir, "repo-audit.json"), encoding="utf-8") as f:
+            audit = json.load(f)
+        candidate = next(item for item in audit["automation_candidates"] if item.get("hypothesis"))
+        _write(promote_dir, "design/loop.json", "{}\n")
+
+        rc = cli_main([
+            "repo",
+            "promote",
+            "--audit",
+            os.path.join(audit_dir, "repo-audit.json"),
+            "--candidate",
+            candidate["id"],
+            "--out",
+            promote_dir,
+        ])
+
+        assert rc == 0
+        assert not os.path.exists(os.path.join(promote_dir, "design", "loop.json"))
+        with open(os.path.join(promote_dir, "inputs", "candidate.json"), encoding="utf-8") as f:
+            promoted_candidate = json.load(f)
+        assert promoted_candidate["hypothesis"] is True
+        with open(os.path.join(promote_dir, "inputs", "promotion.json"), encoding="utf-8") as f:
+            promotion = json.load(f)
+        assert promotion["proof_status"] == "hypothesis_discovery"
+        assert promotion["design_verdict"] == "DISCOVERY_REQUIRED"
+        with open(os.path.join(promote_dir, "design", "design-report.json"), encoding="utf-8") as f:
+            design_report = json.load(f)
+        assert design_report["report"]["verdict"] == "DISCOVERY_REQUIRED"
 
 
 def _run_all():

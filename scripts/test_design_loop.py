@@ -87,6 +87,63 @@ def test_headroom_case_study_builds_clean_l2_spec():
     assert spec["autonomy"]["requested"] == "L2", spec["autonomy"]
 
 
+# ---- Fix 1.3: a vacuous gate is treated like "I don't know", not minted into a loop ----
+
+def test_vacuous_gate_requires_discovery():
+    # "it works" is grammatical but names no measurable signal and no explicit checker.
+    report = d.classify_answers(_answers(gate_check="it works", gate_rung=None))
+    assert report["verdict"] == "DISCOVERY_REQUIRED", report
+
+
+def test_measurable_gate_without_explicit_rung_still_autonomous():
+    # Regression guard: a concrete, machine-decidable gate still qualifies without an explicit rung.
+    report = d.classify_answers(_answers(gate_check="pytest exits 0 and coverage >= 90", gate_rung=None))
+    assert report["verdict"] == "AUTONOMOUS_LOOP", report
+
+
+# ---- Fix 1.4: end_to_end is not fabricated; L3 needs an explicit attestation ----
+
+def test_end_to_end_not_fabricated_when_absent():
+    answers = _answers(unattended=True, proven_manual_pass=True, proven_cheap=True)
+    answers.pop("end_to_end", None)
+    spec, report = d.build_spec(answers)
+    assert spec["verifier"]["end_to_end"] is not True, spec["verifier"]
+    assert spec["autonomy"]["requested"] != "L3", spec["autonomy"]
+
+
+def test_explicit_end_to_end_still_reaches_l3():
+    # Regression guard: when the user DOES attest end_to_end, L3 is still reachable.
+    spec, report = d.build_spec(_answers(unattended=True, proven_manual_pass=True,
+                                         proven_cheap=True, end_to_end=True))
+    assert spec["autonomy"]["requested"] == "L3", spec["autonomy"]
+
+
+# ---- Fix 1.5: the interview elicits every signal its own classifier branches on ----
+
+def test_interview_elicits_step0_decision_keys():
+    keys = {k for k, _ in d.QUESTIONS}
+    for needed in ("deterministic_without_llm", "self_grading", "unattended", "agent_can_do_end_to_end"):
+        assert needed in keys, f"interview never asks {needed!r}; that Step-0 branch can't fire interactively"
+
+
+def test_agent_cannot_end_to_end_string_is_human_in_loop():
+    # Interview answers arrive as strings; "no" must route to HUMAN_IN_LOOP, not slip through.
+    report = d.classify_answers(_answers(agent_can_do_end_to_end="no"))
+    assert report["verdict"] == "HUMAN_IN_LOOP", report
+
+
+def test_agent_cannot_end_to_end_bool_false_is_human_in_loop():
+    # Regression guard: an explicit JSON false must keep routing to HUMAN_IN_LOOP.
+    report = d.classify_answers(_answers(agent_can_do_end_to_end=False))
+    assert report["verdict"] == "HUMAN_IN_LOOP", report
+
+
+def test_agent_end_to_end_unknown_does_not_force_human_in_loop():
+    # Regression guard: a blank/unknown answer must NOT force human-in-the-loop.
+    report = d.classify_answers(_answers(agent_can_do_end_to_end=""))
+    assert report["verdict"] == "AUTONOMOUS_LOOP", report
+
+
 def _run_all():
     fns = sorted((n, fn) for n, fn in globals().items()
                  if n.startswith("test_") and callable(fn))

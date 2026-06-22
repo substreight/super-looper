@@ -1,0 +1,55 @@
+{
+  "name": "untrusted-suite-guard",
+  "goal": {
+    "end_state": "the target repo's test suite passes AND no new lint errors",
+    "evidence": "pytest exits 0 and ruff reports 0 new errors",
+    "constraints": ["do not modify CI config", "do not weaken or skip tests"],
+    "budget": "at most 20 minutes per run in the sandbox"
+  },
+  "scope": {
+    "may_touch": ["src/", "tests/", "state/progress.jsonl"],
+    "must_not_touch": ["CI config", "release credentials", "the host machine"]
+  },
+  "loop_shape": "completion",
+  "trigger": {"type": "manual", "detail": "run on demand in a disposable sandbox", "unattended": false},
+  "iteration": [
+    "load durable progress from disk",
+    "in the isolated runner, install dependencies (network on during setup only)",
+    "make the smallest change toward the failing check; on retry, change approach",
+    "run the suite with the network disabled and write progress to disk"
+  ],
+  "verifier": {
+    "rung": "tool",
+    "check": "pytest exits 0 AND ruff new-error count == 0",
+    "independent": true,
+    "end_to_end": true
+  },
+  "state": {
+    "architecture": "fresh_restart",
+    "on_disk": true,
+    "durable_progress": ["state/progress.jsonl"]
+  },
+  "stop_conditions": {
+    "success": "pytest exits 0 AND ruff new-error count == 0",
+    "max_iterations": 4,
+    "budget": {"max_runtime_seconds": 1200},
+    "no_progress": {"signal": "same failing test", "repeats": 2}
+  },
+  "on_stop": "summarize the diff and remaining failures; do NOT claim success unless the suite passed",
+  "report": {"destination": "local report"},
+  "maker": {"model": "cheap", "effort": "low"},
+  "execution": {
+    "untrusted": true,
+    "policy": {
+      "host_credentials": "none",
+      "network": {"setup": "on", "verification": "off"},
+      "artifacts": "allowlist"
+    }
+  },
+  "autonomy": {
+    "requested": "L1",
+    "output_reversibility": "reversible",
+    "proven_manual_pass": false
+  },
+  "economics": {"billing": "prepaid", "proven_cheap": false}
+}

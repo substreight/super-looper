@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .design import build_spec
+from .validate import max_autonomy
+
 
 class RepoAuditError(RuntimeError):
     """Raised when a repository audit cannot proceed."""
@@ -804,17 +807,18 @@ def _build_surface_candidates(
             continue
         strength = surface["gate_strength"]
         if kind == "ci_workflow" and strength in {"strong", "medium"}:
-            score = _score(38, 32 if strength == "strong" else 22, 14, 10)
+            score = _score(34, 0, 14, 10)
             candidates.append(_candidate(
                 cid=f"surface-ci-repair-{_slug(surface['id'])}",
-                title=f"Repair failures in {surface['title']}",
-                recommended_path="l2_candidate" if strength == "strong" else "human_in_loop",
-                max_agent_autonomy="L2" if strength == "strong" else "L1",
+                title=f"Discover repair opportunities in {surface['title']}",
+                recommended_path="discovery_required",
+                max_agent_autonomy="L0",
                 gate_strength=strength,
+                evidence_level="static_gate_only",
                 score=score,
                 why=[
                     f"Static audit found {len(gate_ids)} verifier gate(s) tied to {surface['title']}.",
-                    "This is narrower and more reviewable than a whole-repo repair loop.",
+                    "A verifier alone is not a repair loop; the missing input is a real failing run or recurring failure class.",
                 ],
                 primary_gates=gate_ids[:5],
                 scope_hint=_surface_scope(surface, files),
@@ -823,7 +827,7 @@ def _build_surface_candidates(
                     "confirmed dependency setup and runtime on a clean or disposable checkout",
                     "maintainer-approved path fence for the repair assistant",
                 ],
-                next_step=f"Run the gates for {surface['title']} once, then create one watched repair case study from a real failure.",
+                next_step=f"Fetch a real failing check or CI log for {surface['title']}, then promote one watched repair case study.",
                 surface_id=surface["id"],
                 surface_title=surface["title"],
             ))
@@ -857,22 +861,24 @@ def _build_surface_candidates(
             categories = ", ".join(surface["categories"])
             candidates.append(_candidate(
                 cid=f"surface-quality-fix-{_slug(surface['id'])}",
-                title=f"Draft {categories} fixes for {', '.join(surface['paths']) or 'repo code'}",
-                recommended_path="l2_candidate",
-                max_agent_autonomy="L2",
+                title=f"Confirm {categories} repair opportunity for {', '.join(surface['paths']) or 'repo code'}",
+                recommended_path="discovery_required",
+                max_agent_autonomy="L0",
                 gate_strength=strength,
-                score=_score(24, 24 if strength == "medium" else 30, 14, 8),
+                evidence_level="static_gate_only",
+                score=_score(24, 0, 14, 8),
                 why=[
                     f"The audit tied {categories} gates to a bounded path surface.",
-                    "These fixes are often objective, but semantic source changes still need tests.",
+                    "Static config proves the gate exists, but repair value requires actual failing lint/typecheck output.",
                 ],
                 primary_gates=gate_ids[:5],
                 scope_hint=_surface_scope(surface, files),
                 missing_evidence=[
+                    f"one real failing {categories} command output",
                     "separate format-only changes from semantic changes",
                     "behavioral tests for any non-format source edits",
                 ],
-                next_step=f"Run the selected {categories} gates once and split format-only fixes from semantic repairs.",
+                next_step=f"Run the selected {categories} gates once; promote only if they fail with actionable output.",
                 surface_id=surface["id"],
                 surface_title=surface["title"],
             ))
@@ -1259,14 +1265,15 @@ def build_candidates(
     if traits["has_ci"] and (strong_gate_ids or medium_gate_ids):
         candidates.append(_candidate(
             cid="ci-failure-repair-assistant",
-            title="Draft fixes for failing CI, gated by repo-native checks",
-            recommended_path="l2_candidate",
-            max_agent_autonomy="L2",
+            title="Discover CI failure repair opportunities from real runs",
+            recommended_path="discovery_required",
+            max_agent_autonomy="L0",
             gate_strength="strong" if strong_gate_ids else "medium",
-            score=_score(34, 32 if strong_gate_ids else 22, 12, 12),
+            evidence_level="static_gate_only",
+            score=_score(32, 0, 12, 12),
             why=[
                 "CI workflows and local verifier commands are present.",
-                "A maker can propose narrow fixes while independent gates decide whether the change is acceptable.",
+                "Static files prove gates exist, but not that there is a recurring, actionable failure to repair.",
             ],
             primary_gates=(strong_gate_ids + medium_gate_ids)[:5],
             scope_hint={
@@ -1274,11 +1281,12 @@ def build_candidates(
                 "must_not_touch": [".github/workflows/", "lockfiles", "release configuration", "credentials"],
             },
             missing_evidence=[
-                "one proven manual pass on a real CI failure",
+                "recent failing CI log, check run, or repeated failure signature",
+                "one proven manual pass on that real CI failure",
                 "explicit scope for which packages or paths the repair assistant may edit",
                 "accept-rate and regression tracking before any unattended trigger",
             ],
-            next_step="Create one case study from a real failing check and require human review of the proposed diff.",
+            next_step="Pull real CI failure history, cluster by error signature, and promote one watched repair only after choosing a concrete failure.",
         ))
 
     if traits["has_tests"] and strong_gate_ids:
@@ -1329,14 +1337,15 @@ def build_candidates(
     if lint_type_ids:
         candidates.append(_candidate(
             cid="lint-typecheck-fix-assistant",
-            title="Draft lint/typecheck fixes with narrow scope",
-            recommended_path="l2_candidate",
-            max_agent_autonomy="L2",
+            title="Confirm lint/typecheck repair opportunity with narrow scope",
+            recommended_path="discovery_required",
+            max_agent_autonomy="L0",
             gate_strength="medium",
-            score=_score(22, 24, 14, 8),
+            evidence_level="static_gate_only",
+            score=_score(22, 0, 14, 8),
             why=[
                 "Static audit found lint, format, or typecheck commands.",
-                "These gates are usually objective but may not prove runtime behavior.",
+                "A lint/typecheck repair loop needs actual failing command output; otherwise this is just existing CI/preflight.",
             ],
             primary_gates=lint_type_ids,
             scope_hint={
@@ -1344,10 +1353,11 @@ def build_candidates(
                 "must_not_touch": ["lockfiles unless explicitly required", ".github/workflows/", "release configuration"],
             },
             missing_evidence=[
+                "one real failing lint, format, or typecheck output",
                 "format/lint commands must be confirmed non-destructive or run on a disposable checkout",
                 "behavioral tests for any non-format source changes",
             ],
-            next_step="Separate format-only fixes from semantic lint/typecheck fixes; gate the latter with tests.",
+            next_step="Run the selected quality gates once; if they fail, promote the captured failure output as the loop input.",
         ))
 
     if syntax_gate_ids:
@@ -1618,3 +1628,431 @@ def write_audit_outputs(audit: Dict[str, Any], out_dir: str) -> Dict[str, str]:
     outputs["ranked_backlog"].write_text(render_ranked_backlog(audit), encoding="utf-8")
     outputs["recommendations"].write_text(render_recommendations(audit), encoding="utf-8")
     return {key: str(path) for key, path in outputs.items()}
+
+
+def _load_audit(path: str) -> Dict[str, Any]:
+    audit_path = Path(path).resolve()
+    try:
+        payload = json.loads(audit_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RepoAuditError(f"could not read audit file {audit_path}: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("mode") != "repo-automation-discovery":
+        raise RepoAuditError(f"{audit_path} is not a repo-audit.json file")
+    return payload
+
+
+def _candidate_by_id(audit: Dict[str, Any], candidate_id: str) -> Dict[str, Any]:
+    for candidate in audit.get("automation_candidates", []):
+        if candidate.get("id") == candidate_id:
+            return candidate
+    raise RepoAuditError(f"candidate not found in audit: {candidate_id}")
+
+
+def _gates_by_id(audit: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {
+        gate["id"]: gate
+        for gate in audit.get("gate_inventory", [])
+        if isinstance(gate, dict) and gate.get("id")
+    }
+
+
+def _candidate_gate_commands(audit: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
+    gates = _gates_by_id(audit)
+    commands = [
+        gates[gate_id]["command"]
+        for gate_id in candidate.get("primary_gates", [])
+        if gate_id in gates and gates[gate_id].get("command")
+    ]
+    return sorted(dict.fromkeys(commands))
+
+
+def _promotion_slug(text: str) -> str:
+    bits = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return "-".join(bits[:10])[:80].strip("-") or "repo-promotion"
+
+
+def _repo_name_from_audit(audit: Dict[str, Any]) -> str:
+    repo_path = audit.get("repo", {}).get("path") or "target-repo"
+    return Path(str(repo_path)).name or "target-repo"
+
+
+def _repo_slug(repo: str) -> str:
+    value = (repo or "").rstrip("/\\")
+    if not value:
+        return "target-repo"
+    name = re.split(r"[/\\]", value)[-1]
+    if name.endswith(".git"):
+        name = name[:-4]
+    return _promotion_slug(name or value)
+
+
+def default_promotion_out_dir(
+    audit_path: str,
+    candidate_id: str,
+    out_root: str = "case-studies",
+    repo: str = "",
+) -> str:
+    """Return the conventional case-study folder for an audit candidate."""
+    audit = _load_audit(audit_path)
+    candidate = _candidate_by_id(audit, candidate_id)
+    repo_name = _repo_slug(repo or _repo_name_from_audit(audit))
+    candidate_name = _promotion_slug(candidate.get("id") or candidate.get("title") or "candidate")
+    return str(Path(out_root) / repo_name / candidate_name)
+
+
+def _proof_status(candidate: Dict[str, Any], gate_commands: Sequence[str]) -> str:
+    if candidate.get("recommended_path") == "do_not_automate":
+        return "rejected"
+    if candidate.get("hypothesis") or candidate.get("evidence_level") == "hypothesis":
+        return "hypothesis_discovery"
+    if candidate.get("recommended_path") == "discovery_required":
+        return "discovery_required"
+    if candidate.get("recommended_path") == "plain_scheduler":
+        return "scheduler_packet"
+    if candidate.get("recommended_path") == "human_in_loop":
+        return "human_review_required"
+    if not gate_commands:
+        return "missing_gate"
+    return "case_study_ready"
+
+
+def _answers_for_candidate(
+    candidate: Dict[str, Any],
+    gate_commands: Sequence[str],
+    max_runtime_seconds: int,
+) -> Dict[str, Any]:
+    scope = candidate.get("scope_hint") or {}
+    may_touch = list(scope.get("may_touch") or [])
+    must_not_touch = list(scope.get("must_not_touch") or [])
+    gate_text = " && ".join(gate_commands) if gate_commands else "unknown"
+    base = {
+        "task": candidate.get("title") or "Promoted repo automation candidate",
+        "recurs": True,
+        "wrong_result_signal": f"one of the selected verifier commands exits nonzero: {gate_text}",
+        "gate_check": f"all selected verifier commands exit 0: {gate_text}",
+        "finished_state": f"{candidate.get('title', 'the candidate')} is resolved and selected gates pass",
+        "evidence": f"selected verifier commands exit 0: {gate_text}",
+        "may_touch": may_touch,
+        "must_not_touch": must_not_touch,
+        "budget": {"max_runtime_seconds": max_runtime_seconds},
+        "budget_summary": f"at most {max_runtime_seconds} seconds per promoted case-study run",
+        "unattended": False,
+        "output_reversibility": "reversible",
+        "gate_rung": "tool" if gate_commands else "independent_model",
+        "end_to_end": candidate.get("gate_strength") == "strong",
+        "agent_can_do_end_to_end": True,
+        "billing": "unknown",
+        "proven_manual_pass": False,
+        "proven_cheap": False,
+        "trigger_type": "manual",
+        "cadence": "manual proof run",
+    }
+    path = candidate.get("recommended_path")
+    if candidate.get("hypothesis") or candidate.get("evidence_level") == "hypothesis":
+        base.update({
+            "recurs": "unknown",
+            "wrong_result_signal": "unknown",
+            "gate_check": "unknown",
+            "finished_state": candidate.get("next_step") or "discovery facts exist",
+        })
+    elif path == "discovery_required":
+        base.update({
+            "wrong_result_signal": "unknown",
+            "gate_check": "unknown",
+            "finished_state": candidate.get("next_step") or "discovery facts exist",
+        })
+    elif path == "plain_scheduler":
+        base["deterministic_without_llm"] = True
+    elif path == "human_in_loop":
+        base["agent_can_do_end_to_end"] = False
+    return base
+
+
+def _render_markdown_list(items: Sequence[str]) -> List[str]:
+    return [f"- {item}" for item in items] if items else ["- none"]
+
+
+def _render_verifier_plan(candidate: Dict[str, Any], gate_commands: Sequence[str]) -> str:
+    lines = [
+        "# Verifier Plan",
+        "",
+        f"Candidate: `{candidate['id']}`",
+        f"Evidence level: `{candidate.get('evidence_level', 'static_evidence')}`",
+        f"Recommended path: `{candidate.get('recommended_path')}`",
+        "",
+        "## Confirmed Commands",
+        "",
+    ]
+    lines.extend(_render_markdown_list([f"`{command}`" for command in gate_commands]))
+    if candidate.get("proposed_verifiers"):
+        lines.extend(["", "## Proposed Verifiers", ""])
+        lines.extend(_render_markdown_list(candidate["proposed_verifiers"]))
+    if candidate.get("missing_evidence"):
+        lines.extend(["", "## Missing Evidence", ""])
+        lines.extend(_render_markdown_list(candidate["missing_evidence"]))
+    lines.extend([
+        "",
+        "## Promotion Rule",
+        "",
+        "Do not claim upstream verification until the selected verifier commands pass on a clean checkout or disposable runner.",
+    ])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_scope_doc(candidate: Dict[str, Any]) -> str:
+    scope = candidate.get("scope_hint") or {}
+    lines = [
+        "# Scope Fence",
+        "",
+        "## May Touch",
+        "",
+    ]
+    lines.extend(_render_markdown_list([f"`{item}`" for item in scope.get("may_touch", [])]))
+    lines.extend(["", "## Must Not Touch", ""])
+    lines.extend(_render_markdown_list([f"`{item}`" for item in scope.get("must_not_touch", [])]))
+    lines.extend([
+        "",
+        "## Rule",
+        "",
+        "Any promoted run must fail its scope check if changed files fall outside `may_touch` or inside `must_not_touch`.",
+    ])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_runner_plan_note(manifest: Dict[str, Any], candidate: Dict[str, Any]) -> str:
+    setup = "deps" if candidate.get("recommended_path") in {"l2_candidate", "human_in_loop"} else "none"
+    lines = [
+        "# Runner Plan Note",
+        "",
+        "Use a disposable runner before installing target-repo dependencies or running untrusted setup scripts.",
+        "",
+        "```bash",
+        "super-looper runner plan \\",
+        "  --profile .super-looper/runners/<runner>.profile.json \\",
+        "  --case <this-promotion-directory> \\",
+        f"  --repo {manifest['repo']} \\",
+        f"  --setup {setup} \\",
+        "  --isolation container \\",
+        "  --allow-network-setup \\",
+        "  --out remote-plan.json",
+        "```",
+        "",
+        "Keep verifier network disabled unless the candidate explicitly requires live integration checks.",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_maintainer_brief(
+    audit: Dict[str, Any],
+    candidate: Dict[str, Any],
+    gate_commands: Sequence[str],
+    proof_status: str,
+    repo: str = "",
+) -> str:
+    repo_label = repo or audit.get("repo", {}).get("path", "unknown")
+    lines = [
+        "# Maintainer Brief",
+        "",
+        f"Repository: `{repo_label}`",
+        f"Candidate: `{candidate['id']}`",
+        f"Title: {candidate['title']}",
+        f"Proof status: `{proof_status}`",
+        f"Recommended path: `{candidate.get('recommended_path')}`",
+        f"Max agent autonomy from audit: `{candidate.get('max_agent_autonomy')}`",
+        f"Evidence level: `{candidate.get('evidence_level', 'static_evidence')}`",
+        "",
+        "## Why This Candidate",
+        "",
+    ]
+    lines.extend(_render_markdown_list(candidate.get("why", [])))
+    lines.extend(["", "## Gates", ""])
+    lines.extend(_render_markdown_list([f"`{command}`" for command in gate_commands]))
+    lines.extend(["", "## Next Step", "", candidate.get("next_step") or "Run a watched proof pass."])
+    if candidate.get("hypothesis"):
+        lines.extend([
+            "",
+            "## Hypothesis Warning",
+            "",
+            "This is a creative discovery lead, not a confirmed automation candidate. Build and run the proposed verifier before claiming value.",
+        ])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _promotion_summary(
+    *,
+    audit_path: Path,
+    out_dir: Path,
+    candidate: Dict[str, Any],
+    gate_commands: Sequence[str],
+    proof_status: str,
+    manifest: Dict[str, Any],
+    design_report: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "mode": "repo-candidate-promotion",
+        "source_audit": str(audit_path),
+        "candidate_id": candidate["id"],
+        "candidate_title": candidate["title"],
+        "proof_status": proof_status,
+        "recommended_path": candidate.get("recommended_path"),
+        "evidence_level": candidate.get("evidence_level", "static_evidence"),
+        "hypothesis": bool(candidate.get("hypothesis")),
+        "verifier_commands": list(gate_commands),
+        "manifest": "case-study.json",
+        "design_verdict": design_report.get("report", {}).get("verdict"),
+        "taxonomy": {
+            "root": ["case-study.json"],
+            "inputs": ["audit-summary.json", "candidate.json", "answers.json", "promotion.json"],
+            "design": ["design-report.json", "loop.json when answers compile"],
+            "proof": ["verifier-plan.md", "scope.md", "runner-plan.md", "runs/"],
+            "reports": ["maintainer-brief.md", "promotion-summary.md"],
+        },
+        "out_dir": str(out_dir),
+        "case_study": manifest,
+    }
+
+
+def _render_promotion_summary(payload: Dict[str, Any]) -> str:
+    lines = [
+        "# Promotion Summary",
+        "",
+        f"Candidate: `{payload['candidate_id']}`",
+        f"Proof status: `{payload['proof_status']}`",
+        f"Recommended path: `{payload['recommended_path']}`",
+        f"Evidence level: `{payload['evidence_level']}`",
+        f"Design verdict: `{payload.get('design_verdict') or 'not_available'}`",
+        "",
+        "## Taxonomy",
+        "",
+    ]
+    for folder, files in payload["taxonomy"].items():
+        lines.append(f"- `{folder}/`: {', '.join(files)}")
+    lines.extend(["", "## Verifiers", ""])
+    lines.extend(_render_markdown_list([f"`{command}`" for command in payload.get("verifier_commands", [])]))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def promote_candidate(
+    audit_path: str,
+    candidate_id: str,
+    out_dir: Optional[str] = None,
+    repo: Optional[str] = None,
+    issue: Optional[str] = None,
+    name: Optional[str] = None,
+    max_runtime_seconds: int = 1800,
+    out_root: str = "case-studies",
+) -> Dict[str, Any]:
+    """Promote an audit candidate into a clean case-study proof packet."""
+    source = Path(audit_path).resolve()
+    audit = _load_audit(str(source))
+    candidate = _candidate_by_id(audit, candidate_id)
+    if candidate.get("recommended_path") == "do_not_automate":
+        raise RepoAuditError("refusing to promote a do_not_automate candidate")
+    gates = _candidate_gate_commands(audit, candidate)
+    target_out = out_dir or default_promotion_out_dir(
+        str(source),
+        candidate_id,
+        out_root=out_root,
+        repo=repo or "",
+    )
+    root = Path(target_out).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    for subdir in ("inputs", "design", "proof", "proof/runs", "reports"):
+        (root / subdir).mkdir(parents=True, exist_ok=True)
+
+    repo_value = repo or audit.get("repo", {}).get("path") or ""
+    study_name = name or (
+        f"{_repo_slug(repo_value or _repo_name_from_audit(audit))}-"
+        f"{_promotion_slug(candidate['id'])}"
+    )
+    manifest = {
+        "name": study_name,
+        "repo": repo_value,
+        "issue": issue or "",
+        "answers": "inputs/answers.json",
+        "loop_spec": "design/loop.json",
+        "design_report": "design/design-report.json",
+        "verifier": gates,
+        "may_touch": list((candidate.get("scope_hint") or {}).get("may_touch") or []),
+        "must_not_touch": list((candidate.get("scope_hint") or {}).get("must_not_touch") or []),
+        "budget": {"max_runtime_seconds": max_runtime_seconds},
+        "runs_dir": "proof/runs",
+        "promotion": "inputs/promotion.json",
+    }
+
+    answers = _answers_for_candidate(candidate, gates, max_runtime_seconds)
+    spec, report = build_spec(answers)
+    design_report = {
+        "manifest": "case-study.json",
+        "answers": "inputs/answers.json",
+        "candidate": "inputs/candidate.json",
+        "report": report,
+    }
+    if spec is not None:
+        design_report["loop_spec"] = "design/loop.json"
+        design_report["max_autonomy"] = max_autonomy(spec)[0]
+        _json_write(root / "design" / "loop.json", spec)
+    else:
+        loop_path = root / "design" / "loop.json"
+        if loop_path.exists():
+            loop_path.unlink()
+
+    proof_status = _proof_status(candidate, gates)
+    promotion = _promotion_summary(
+        audit_path=source,
+        out_dir=root,
+        candidate=candidate,
+        gate_commands=gates,
+        proof_status=proof_status,
+        manifest=manifest,
+        design_report=design_report,
+    )
+
+    audit_summary = {
+        "schema_version": audit.get("schema_version"),
+        "repo": audit.get("repo"),
+        "summary": audit.get("summary"),
+    }
+    _json_write(root / "case-study.json", manifest)
+    _json_write(root / "inputs" / "audit-summary.json", audit_summary)
+    _json_write(root / "inputs" / "candidate.json", candidate)
+    _json_write(root / "inputs" / "answers.json", answers)
+    _json_write(root / "inputs" / "promotion.json", promotion)
+    _json_write(root / "design" / "design-report.json", design_report)
+    (root / "proof" / "verifier-plan.md").write_text(_render_verifier_plan(candidate, gates), encoding="utf-8")
+    (root / "proof" / "scope.md").write_text(_render_scope_doc(candidate), encoding="utf-8")
+    (root / "proof" / "runner-plan.md").write_text(_render_runner_plan_note(manifest, candidate), encoding="utf-8")
+    (root / "reports" / "maintainer-brief.md").write_text(
+        _render_maintainer_brief(audit, candidate, gates, proof_status, repo=repo_value),
+        encoding="utf-8",
+    )
+    (root / "reports" / "promotion-summary.md").write_text(_render_promotion_summary(promotion), encoding="utf-8")
+
+    outputs = {
+        "case_study": str(root / "case-study.json"),
+        "promotion": str(root / "inputs" / "promotion.json"),
+        "answers": str(root / "inputs" / "answers.json"),
+        "candidate": str(root / "inputs" / "candidate.json"),
+        "design_report": str(root / "design" / "design-report.json"),
+        "verifier_plan": str(root / "proof" / "verifier-plan.md"),
+        "scope": str(root / "proof" / "scope.md"),
+        "runner_plan": str(root / "proof" / "runner-plan.md"),
+        "maintainer_brief": str(root / "reports" / "maintainer-brief.md"),
+        "promotion_summary": str(root / "reports" / "promotion-summary.md"),
+    }
+    if spec is not None:
+        outputs["loop_spec"] = str(root / "design" / "loop.json")
+    return {
+        "out_dir": str(root),
+        "proof_status": proof_status,
+        "candidate": {
+            "id": candidate["id"],
+            "title": candidate["title"],
+            "recommended_path": candidate.get("recommended_path"),
+            "evidence_level": candidate.get("evidence_level", "static_evidence"),
+            "hypothesis": bool(candidate.get("hypothesis")),
+        },
+        "design_verdict": report.get("verdict"),
+        "outputs": outputs,
+    }

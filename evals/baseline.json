@@ -1,10 +1,10 @@
 {
   "recorded": "2026-06-21",
   "skill_state": "v0.3.0 — after unknown-safe discovery verdicts, stricter autonomy enforcement, and the deterministic interview/spec compiler",
-  "harness": "fresh blind subagents (Claude Sonnet), one per scenario, verdicts as in results.example.jsonl",
+  "harness": "fresh blind subagents (Claude Sonnet), one per scenario, verdicts as in results.sample.jsonl",
   "scenarios": 10,
   "passed": 10,
   "accuracy": 1.0,
   "min_required": 0.8,
-  "notes": "Re-baselined for v0.3.0. New scenario 'unknown-interview' tests that missing critical interview answers produce DISCOVERY_REQUIRED and L0 discovery work instead of guessed specs. 'ts-client' still accepts USE_SCHEDULER because deterministic codegen plus tsc can be soundly read as a scheduled job unless agent repair is required. Re-run via EVAL.md after any edit; accuracy must hold and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8` -> 10/10."
+  "notes": "Re-baselined for v0.3.0. New scenario 'unknown-interview' tests that missing critical interview answers produce DISCOVERY_REQUIRED and L0 discovery work instead of guessed specs. 'ts-client' still accepts USE_SCHEDULER because deterministic codegen plus tsc can be soundly read as a scheduled job unless agent repair is required. Re-run via EVAL.md after any edit; accuracy must hold and no previously-passing scenario may regress. Reproduce: `python score_eval.py scenarios.jsonl results.sample.jsonl --min 0.8` -> 10/10."
 }

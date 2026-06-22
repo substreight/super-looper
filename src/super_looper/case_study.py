@@ -151,7 +151,9 @@ def design_case_study(manifest_path: str) -> Dict[str, Any]:
         _json_write(loop_path, spec)
         result["loop_spec"] = _rel(base_dir, loop_path)
         result["max_autonomy"] = max_autonomy(spec)[0]
-    _json_write(os.path.join(base_dir, "design-report.json"), result)
+    design_report_path = _resolve_relative(base_dir, manifest.get("design_report") or "design-report.json")
+    assert design_report_path is not None
+    _json_write(design_report_path, result)
     return result
 
 

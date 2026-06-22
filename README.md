@@ -32,7 +32,7 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
 | `src/super_looper/` | installable CLI + importable validator/compiler package |
-| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 68 tests |
+| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 70 tests |
 | `examples/` | worked loop specs + interview answer fixtures, including a Headroom case study |
 | `case-studies/` | public-target manifests and reports that show what autonomy level a real task actually earns |
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
@@ -68,6 +68,16 @@ Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`,
 super-looper repo audit --repo-path ../some-repo --out repo-audit
 ```
 The audit writes `repo-audit.json`, `gate-inventory.json`, `repo-surfaces.json`, `automation-candidates.json`, `loop-hypotheses.json`, `ranked-backlog.md`, and `recommendations.md`. It inventories repo-native gates from CI workflows, `pyproject.toml`, `package.json`, Makefile, tox/nox, Rust, and Go metadata, maps gates to bounded repo surfaces such as workflows, test suites, docs/examples, and code-quality paths, then classifies candidates as `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate`. It also proposes clearly labeled loop hypotheses for plausible opportunities such as flaky CI triage, example smoke tests, integration drift, CLI contracts, release smoke checks, and performance watchpoints. Static audit never grants L3; it is discovery input for deciding whether autonomy is justified.
+
+A repo-native gate is not, by itself, a repair loop. Repair candidates stay `discovery_required` until there is a concrete input signal such as failing lint/typecheck output, a failing check log, repeated failure signature, dependency-bump failure, flaky-test history, or maintainer-provided recurring task. Otherwise the honest recommendation is to run the gate as CI/scheduled verification, not to wrap pytest or ruff in a loop.
+
+**Promote one candidate into an organized proof packet:**
+```
+super-looper repo promote \
+  --audit repo-audit/repo-audit.json \
+  --candidate surface-ci-repair-tests-yml
+```
+When `--out` is omitted, promotion writes to `case-studies/<repo-slug>/<candidate-slug>/`. Use `--out-root .super-looper/promotions` for scratch work or `--out case-studies/<repo-slug>/<candidate-slug>` for an exact destination. The packet taxonomy is stable: `case-study.json` at the root; `inputs/` for audit summary, candidate, answers, and promotion metadata; `design/` for `design-report.json` and `loop.json` when the candidate truly compiles; `proof/` for verifier, scope, runner plan, and future runs; `reports/` for maintainer-facing markdown. Hypotheses stay discovery packets and do not get fake loop specs.
 
 **Run a real-repo case study:**
 ```
@@ -107,10 +117,12 @@ super-looper runner plan \
 ```
 Remote plans are local JSON only: they validate a hardened SSH/container policy without executing SSH. `bootstrap-plan` supports `digitalocean`, `aws`, `gcp`, `azure`, `hetzner`, and `custom` presets; the core runner is provider-neutral SSH. Defaults are credential-spillage resistant: dedicated runner key, no agent forwarding, no password auth, strict host-key checking, no host home/credential/package-cache mounts, verifier network disabled unless explicitly allowed, artifact allowlist only, and remote workdir cleanup by default. See [`references/remote-runners.md`](references/remote-runners.md).
 
-**Gate the skill itself** (run after any edit to it):
+**Gate the skill itself** — run the *actual* skill blind over every scenario and score the live output (the real gate; CI runs this on push-to-main + nightly + on demand):
 ```
-cd evals && python score_eval.py scenarios.jsonl results.example.jsonl --min 0.8   # -> 10/10
+python evals/run_skill_eval.py --skill SKILL.md --scenarios evals/scenarios.jsonl --out results.live.jsonl --model claude-opus-4-8
+python evals/score_eval.py evals/scenarios.jsonl results.live.jsonl --min 0.8
 ```
+The deterministic scorer is also self-tested on every PR against a frozen sample (`results.sample.jsonl`) — which, being frozen, cannot by itself catch a skill regression.
 
 ## The five-part anatomy
 - **Goal** — a contract, not a prompt: end state · evidence · constraints · budget.
