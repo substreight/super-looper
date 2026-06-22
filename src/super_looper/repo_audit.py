@@ -186,7 +186,7 @@ def _top_level_python_roots(files: Sequence[str]) -> List[str]:
 
 
 def _classify_command(command: str) -> str:
-    lower = command.lower()
+    lower = re.sub(r"\b(npm|pnpm|yarn|bun)\s+run\s+", r"\1 ", command.lower())
     for category, pattern in _COMMAND_CATEGORY_PATTERNS:
         if pattern.search(lower):
             return category
@@ -264,11 +264,34 @@ def _make_gate(command: str, source: str, rationale: str) -> Gate:
     )
 
 
+_NON_VERIFIER_RE = re.compile(
+    r"\b(prepare[-_]release|release[-_](pr|notes)|gh[-_]release|update[-_]plugin[-_]list|"
+    r"bump[-_]version|version[-_]bump)\b"
+)
+
+
+def _is_non_runnable(command: str) -> bool:
+    """A command with unexpanded CI interpolation or shell substitution isn't a runnable gate."""
+    return ("${{" in command) or ("`" in command) or ("$(" in command)
+
+
+def _is_non_verifier(command: str) -> bool:
+    """Release/automation tasks (prepare-release, generate release notes, ...) aren't gates."""
+    return bool(_NON_VERIFIER_RE.search(command.lower()))
+
+
+def _gate_dedup_key(command: str) -> str:
+    """Canonical key so the same gate from several sources (and `yarn run x` vs `yarn x`) merges."""
+    canon = re.sub(r"\b(npm|pnpm|yarn|bun)\s+run\s+", r"\1 ", command.lower())
+    return " ".join(canon.split())
+
+
 def _add_gate(gates: List[Gate], command: str, source: str, rationale: str) -> None:
     command = " ".join(command.strip().split())
-    if not command:
+    if not command or _is_non_runnable(command) or _is_non_verifier(command):
         return
-    if any(g.command == command and g.source == source for g in gates):
+    key = _gate_dedup_key(command)
+    if any(_gate_dedup_key(g.command) == key for g in gates):
         return
     gates.append(_make_gate(command, source, rationale))
 

@@ -12,7 +12,12 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from super_looper.cli import main as cli_main  # noqa: E402
-from super_looper.repo_audit import audit_repo, default_promotion_out_dir  # noqa: E402
+from super_looper.repo_audit import (  # noqa: E402
+    audit_repo,
+    default_promotion_out_dir,
+    _add_gate,
+    _classify_command,
+)
 
 
 def _write(root, rel, text):
@@ -359,6 +364,45 @@ def test_script_name_match_is_word_boundary():
         commands = {gate["command"] for gate in audit["gate_inventory"]}
         assert any("test" in command for command in commands), commands
         assert not any("latest" in command for command in commands), commands
+
+
+# ---- gate hygiene (dogfood findings: dedup, CI interpolation, non-verifier tasks) ----
+
+def test_add_gate_dedupes_same_command_across_sources():
+    gates = []
+    _add_gate(gates, "make test", "Makefile", "x")
+    _add_gate(gates, "make test", ".github/workflows/ci.yml", "y")
+    _add_gate(gates, "make test", ".github/workflows/macos.yml", "z")
+    assert len(gates) == 1, [g.command for g in gates]
+
+
+def test_add_gate_rejects_ci_template_interpolation():
+    gates = []
+    _add_gate(gates, "tox run -e ${{ matrix.tox_env }} --installpkg `find dist/*.tar.gz`", ".github/workflows/test.yml", "x")
+    _add_gate(gates, "${{ env.CARGO }} build --workspace", ".github/workflows/ci.yml", "x")
+    assert gates == [], [g.command for g in gates]
+
+
+def test_add_gate_rejects_non_verifier_release_tasks():
+    gates = []
+    _add_gate(gates, "tox -e prepare-release-pr -- main --major", ".github/workflows/a.yml", "x")
+    _add_gate(gates, "tox -e generate-gh-release-notes -- v1", ".github/workflows/b.yml", "x")
+    _add_gate(gates, "tox -e update-plugin-list", ".github/workflows/c.yml", "x")
+    assert gates == [], [g.command for g in gates]
+
+
+def test_classify_normalizes_run_wrapper():
+    assert _classify_command("yarn run test") == "test"
+    assert _classify_command("yarn test") == "test"
+    assert _classify_command("npm run typecheck") == "typecheck"
+
+
+def test_yarn_run_test_dedupes_and_is_test_strength():
+    gates = []
+    _add_gate(gates, "yarn test", ".github/workflows/ci.yml", "x")
+    _add_gate(gates, "yarn run test", "package.json", "y")
+    assert len(gates) == 1, [g.command for g in gates]
+    assert gates[0].category == "test" and gates[0].strength == "strong", gates[0]
 
 
 def _run_all():
