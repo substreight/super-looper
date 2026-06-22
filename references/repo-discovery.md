@@ -9,7 +9,7 @@ Repo discovery is not loop generation. It is a conservative triage pass:
 1. Inventory repo-native gates.
 2. Map gates to bounded repo surfaces: CI workflows, test suites, code-quality paths, docs/examples, or whole-repo fallbacks.
 3. Identify recurring work that might be automatable.
-4. Propose labeled loop hypotheses from repo signals when a valuable loop might exist but has not been proven yet.
+4. Propose labeled **automation leads** from repo signals when a valuable loop might exist but has not been proven yet. A lead is intake — it becomes a loop only by passing core qualification (the verdict engine), never from static evidence alone.
 5. Rank options by leverage, gate strength, effort, and risk.
 6. Route each option to the right path: plain scheduler, human-in-loop, L2 candidate, discovery required, or do not automate.
 7. Stop before building or scheduling anything.
@@ -34,7 +34,7 @@ Artifacts:
 - `gate-inventory.json` - discovered commands with source, category, strength, and safety notes.
 - `repo-surfaces.json` - bounded surfaces that gates appear to exercise, such as a workflow, test suite, docs/examples surface, or lint/typecheck surface.
 - `automation-candidates.json` - ranked candidate portfolio.
-- `loop-hypotheses.json` - creative, explicitly unproven opportunities inferred from repo signals, with proposed verifiers and discovery questions.
+- `automation-leads.json` (alias: `loop-hypotheses.json`) - creative, explicitly unproven **automation leads** inferred from repo signals, with proposed verifiers and discovery questions. Intake only; not loops until they qualify.
 - `ranked-backlog.md` - human-readable ranked backlog.
 - `recommendations.md` - best next moves and guardrails.
 

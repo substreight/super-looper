@@ -15,11 +15,13 @@
 
 > **A loop is a goal plus a gate. The gate is the design.**
 
-**super-looper** is a meta-skill for designing clean, minimal **agentic loops** — and, more often, for talking you *out* of building one.
+**super-looper** is a meta-skill *and a tiny deterministic runtime* for **agentic loops**: it decides whether a loop is even worth building (usually not), and — for the rare one that is — makes the loop a first-class *deterministic object* you can actually run. Its rule: **determinism → code, judgment → the model, infrastructure → the environment.** Most of a loop (counting iterations, enforcing a budget, keeping state, the keep/revert ratchet) is deterministic; faking it with prompt engineering is slow, expensive, and unreliable, so super-looper pulls that skeleton out of the prompt and into code.
 
 The unglamorous pitch: most "autonomous loop" ideas are net-negative — they spin, drift, or quietly bill you to ship confidently-wrong work *faster*. So super-looper's first job is to say **no**. Its second is to make the rare loop that *is* worth building actually converge — by forcing you to design the gate before the machinery, keep state out of the context window, and never let the thing being judged grade itself. It enforces the non-negotiables with a machine-checkable spec + a **zero-dependency validator**, and ships with **its own eval suite** so the skill can't silently regress.
 
-It insists on two more things. Autonomy is **earned, not toggled** — a loop runs only as unattended as its gate, scope, budget, reversibility, and proven manual pass allow, and the validator refuses anything more. And you shouldn't have to read the skill to use it: a six-question interview derives the verdict and the spec, `DISCOVERY_REQUIRED` handles unknown answers without guessing, and `--explain` previews any loop in one plain sentence.
+It insists on two more things. Autonomy is **earned, not toggled** — a loop runs only as unattended as its gate, scope, budget, reversibility, and proven manual pass allow, and the validator refuses anything more. And you shouldn't have to read the skill to use it: a guided interview derives the verdict and the spec, `DISCOVERY_REQUIRED` handles unknown answers without guessing, and `--explain` previews any loop in one plain sentence.
+
+When a loop *does* qualify, `super-looper run <spec> --propose <cmd> --verify <cmd>` runs the deterministic skeleton — calling your model only for the single creative step (propose the next change), your gate as a tool, and leaving *where it runs* to your own sandbox. The perimeter that isn't the core (the case-study harness, the remote-runner transport) lives in `super_looper/experimental/`; the minimal path never loads it.
 
 ## The one idea
 An agentic loop runs DISCOVER → PLAN → EXECUTE → VERIFY → ITERATE on its own, until an objective gate passes or a hard limit trips — no human pushing each step. The part that makes it a loop and not a model talking to itself is **VERIFY**: a check, ideally outside the model, that can actually *fail* the work.
@@ -30,15 +32,15 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | path | what |
 |---|---|
 | `SKILL.md` | the skill — load it into your agent harness |
-| `references/` | 5 filled templates · state architecture · failure modes · **verified** evidence |
-| `src/super_looper/` | installable CLI + importable validator/compiler package |
-| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + 70 tests |
-| `examples/` | worked loop specs + interview answer fixtures, including a Headroom case study |
-| `case-studies/` | public-target manifests and reports that show what autonomy level a real task actually earns |
-| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer (10/10 baseline) |
+| `references/` | filled templates · state architecture · failure modes · **verified** evidence |
+| `src/super_looper/` | the **core**: verdict engine + zero-dep validator + autonomy ceiling + **the loop driver** (`runtime.py`) + CLI |
+| `src/super_looper/experimental/` | relegated perimeter — the case-study harness + remote-runner *transport*. Not the core; lazy-loaded. |
+| `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + the test suite |
+| `examples/` | worked loop specs + interview fixtures |
+| `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer; CI runs the **actual skill** blind |
 
 ## Quickstart
-**Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision. Haven't read the skill? Just describe your task — it runs a six-question interview (does it recur? what would automatically prove a result wrong? what must it never touch?) and derives the rest.
+**Design a loop (or get talked out of one):** point your agent at `SKILL.md`. It qualifies via Step 0, designs the gate first, ranks the options, and hands *you* the decision. Haven't read the skill? Just describe your task — it runs a guided interview (does it recur? what would automatically prove a result wrong? what must it never touch?) and derives the rest.
 
 **Install the CLI:**
 ```
@@ -67,7 +69,7 @@ Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`,
 ```
 super-looper repo audit --repo-path ../some-repo --out repo-audit
 ```
-The audit writes `repo-audit.json`, `gate-inventory.json`, `repo-surfaces.json`, `automation-candidates.json`, `loop-hypotheses.json`, `ranked-backlog.md`, and `recommendations.md`. It inventories repo-native gates from CI workflows, `pyproject.toml`, `package.json`, Makefile, tox/nox, Rust, and Go metadata, maps gates to bounded repo surfaces such as workflows, test suites, docs/examples, and code-quality paths, then classifies candidates as `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate`. It also proposes clearly labeled loop hypotheses for plausible opportunities such as flaky CI triage, example smoke tests, integration drift, CLI contracts, release smoke checks, and performance watchpoints. Static audit never grants L3; it is discovery input for deciding whether autonomy is justified.
+The audit writes `repo-audit.json`, `gate-inventory.json`, `repo-surfaces.json`, `automation-candidates.json`, `automation-leads.json` (alias: `loop-hypotheses.json`), `ranked-backlog.md`, and `recommendations.md`. It inventories repo-native gates from CI workflows, `pyproject.toml`, `package.json`, Makefile, tox/nox, Rust, and Go metadata, maps gates to bounded repo surfaces such as workflows, test suites, docs/examples, and code-quality paths, then classifies candidates as `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate`. It also proposes clearly labeled **automation leads** (intake — a lead is not a loop until it passes core qualification) for plausible opportunities such as flaky CI triage, example smoke tests, integration drift, CLI contracts, release smoke checks, and performance watchpoints. Static audit never grants L3; it is discovery input for deciding whether autonomy is justified.
 
 A repo-native gate is not, by itself, a repair loop. Repair candidates stay `discovery_required` until there is a concrete input signal such as failing lint/typecheck output, a failing check log, repeated failure signature, dependency-bump failure, flaky-test history, or maintainer-provided recurring task. Otherwise the honest recommendation is to run the gate as CI/scheduled verification, not to wrap pytest or ruff in a loop.
 

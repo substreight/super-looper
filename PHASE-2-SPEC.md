@@ -169,10 +169,11 @@ run_loop(spec, *, propose, verify, store, clock=...) -> RunResult
 `2.1 (+schema-sync)` → `2.3 (+#6 static)` → `2.4 (driver + #7 + quarantine)` → `2.5 (adapter + promotion + #9)` → `2.2 (+lazy imports)`
 Lessons become a core primitive or a spec requirement (2.1, 2.3, 2.4-driver) before any module is relegated (2.4-move, 2.2).
 
-## Close-out (after the five)
-- **Release/version hygiene:** bump to `0.6.0`, sync `pyproject`/`__init__`, backfill the `v0.4.0` tag, add a fail-on-dirty-at-release check.
-- **README/SKILL re-lead:** refusal-first message and the lean core first; the (now experimental) subsystems below; fix "six-question interview" → twelve.
-- **Migration note** for renamed audit outputs and CLI verbs (aliases + when they drop).
+## Close-out ✅ DONE
+- ✅ **Version hygiene (#18):** bumped to `0.6.0` in `pyproject` + `__init__` (and added `run_loop`/`RunResult` to the package API); `super-looper --version` no longer lies.
+- ✅ **CHANGELOG:** the `0.6.0` entry is dated (2026-06-22) and comprehensive — driver, execution policy, validator honesty, sketches, the qualifying adapter, and the experimental relegation.
+- ✅ **README re-lead:** the pitch now leads with *both* jobs (judge + make-the-loop-a-deterministic-object) under the determinism/judgment/infrastructure rule; "what's in the box" shows the **core** vs `experimental/`; `super-looper run` + the driver are documented; stale bits fixed ("six-question" → guided; "loop hypotheses" → **automation leads**) here and in `references/repo-discovery.md`.
+- ⏳ **Deferred to merge/release (not on a feature branch):** backfill the `v0.4.0` tag + tag `v0.6.0`, and a fail-on-dirty-at-release check. Migration: `loop-hypotheses.json`, `simulate-verifier`/`--no-shadow`, `super_looper.case_study`/`remote_runner`, and `simulate_shadow_verifier` are all back-compat aliases for one release.
 
 ## Definition of done (Phase 2)
 1. An untrusted loop that will run without a coherent isolation policy is refused; a trusted loop and L0 drafts are unaffected (2.1).

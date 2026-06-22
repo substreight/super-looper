@@ -1,13 +1,31 @@
 # Changelog
 
-## 0.6.0 - unreleased
-Candidate promotion proof packets.
+## 0.6.0 — 2026-06-22
+**Back to center:** the loop as a deterministic primitive, an honest validator, and a relegated perimeter. See `SCOPE.md` for the north star — *determinism → code, judgment → the model, infrastructure → the environment.*
 
-- **Repo candidate promotion:** added `super-looper repo promote` to turn one audit candidate into a case-study proof packet.
-- **Clean taxonomy:** promotion writes `case-study.json`, `inputs/`, `design/`, `proof/`, and `reports/` with stable names for downstream review, remote runs, and maintainer sharing.
-- **Safe hypothesis handling:** creative repo hypotheses remain discovery packets and intentionally do not receive `design/loop.json` until verifier evidence exists.
-- **Default naming convention:** when `--out` is omitted, promotion writes to `case-studies/<repo-slug>/<candidate-slug>/`; `--out-root` keeps the convention under a different root.
-- **Gate-only hardening:** repair candidates found from static repo files now stay `discovery_required` with `static_gate_only` evidence until failing lint/typecheck output, a real failing check, repeated failure signature, dependency-bump failure, flaky-test history, or maintainer task proves there is an actionable loop.
+**Core — make the loop first-class:**
+- **Loop driver (`super_looper.runtime.run_loop`):** a tiny deterministic executor that runs a validated loop's skeleton *in code* — iteration/budget/no-progress caps, the keep/revert ratchet, state checkpointing — with the model's `propose` step, the gate, the workspace, and the clock all **injected**. `super-looper run <spec> --propose <cmd> --verify <cmd>` drives it. No LLM/network/subprocess of its own; fail-closed (only an explicit pass keeps).
+- **Execution policy:** `execution.untrusted` + `execution.policy {host_credentials, network{setup,verification}, artifacts}`. A loop that runs untrusted code must declare a coherent isolation policy before it runs; the validator refuses without it — but super-looper never owns the sandbox.
+
+**Validator honesty (the core stops lying):**
+- Gate quality caps the autonomy ceiling — a weasel/taste gate can no longer earn L3.
+- The zero-dependency checker rejects typo'd/unknown keys (budget + the new policy object).
+- Vacuous gates route to `DISCOVERY_REQUIRED`; the compiler no longer fabricates `verifier.end_to_end`.
+- The interview now elicits every signal its own classifier branches on.
+
+**Evidence discipline:**
+- Shadow verifiers reframed as **verifier sketches** — a proposal that appears viable, never proof; a sketch can never reach a PR-ready claim (back-compat aliases kept one release).
+- New `unconfirmed` evidence tier: a path-less verifier command (e.g. `make check`) runs but is never proof; absent/partial runs fail closed to `missing`.
+
+**Repo-audit → qualifying intake adapter:**
+- Speaks **automation leads** (`automation-leads.json`; `loop-hypotheses.json` kept as an alias) — a lead is intake, not a loop. Promotion emits a loop spec only on a real qualification verdict; unqualified leads stay discovery packets.
+- Word-boundary gate matching (`latest` no longer matches `test`).
+- `super-looper repo promote` turns one candidate into a clean case-study proof packet (`case-study.json`, `inputs/`, `design/`, `proof/`, `reports/`).
+
+**Project hygiene / relegation:**
+- CI now invokes the **actual skill** blind over each scenario (Opus, secret-gated) instead of scoring a frozen file; it runs all test modules; the frozen file is a clearly-labeled scorer self-test.
+- The case-study harness and the remote-runner transport are relegated to `super_looper/experimental/` (back-compat shims kept); the CLI lazy-loads the perimeter so `validate`/`run`/`explain`/`max-autonomy` load **none** of it.
+- The remote-runner plan no longer asserts security controls it doesn't enforce (`isolation_enforced` / `not_enforced_here` make advisory-vs-enforced explicit).
 
 ## 0.5.0 — 2026-06-21
 Repository automation discovery + loop hypotheses.
