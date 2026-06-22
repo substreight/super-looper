@@ -194,6 +194,7 @@ def test_repo_audit_writes_reviewable_artifacts_and_cli_summary():
             "repo-audit.json",
             "gate-inventory.json",
             "repo-surfaces.json",
+            "automation-leads.json",
             "loop-hypotheses.json",
             "automation-candidates.json",
             "ranked-backlog.md",
@@ -347,6 +348,17 @@ def test_repo_promote_keeps_hypotheses_as_discovery_packets():
         with open(os.path.join(promote_dir, "design", "design-report.json"), encoding="utf-8") as f:
             design_report = json.load(f)
         assert design_report["report"]["verdict"] == "DISCOVERY_REQUIRED"
+
+
+def test_script_name_match_is_word_boundary():
+    # #9: a script named "latest" must NOT register as a `test` gate (no substring match); "test" must.
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        _write(repo, "package.json", json.dumps({"scripts": {"latest": "release.sh", "test": "jest"}}))
+        audit = audit_repo(repo)
+        commands = {gate["command"] for gate in audit["gate_inventory"]}
+        assert any("test" in command for command in commands), commands
+        assert not any("latest" in command for command in commands), commands
 
 
 def _run_all():

@@ -83,6 +83,18 @@ _SCRIPT_NAMES = {
     "build": "build",
     "check": "check",
 }
+
+
+_SCRIPT_NAME_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(k) for k in sorted(_SCRIPT_NAMES, key=len, reverse=True)) + r")\b"
+)
+
+
+def _name_matches_script(lowered_name: str) -> bool:
+    """Word-boundary match (#9): `latest` must NOT match `test`, but `test` / `test:cov` do."""
+    return bool(_SCRIPT_NAME_RE.search(lowered_name))
+
+
 _COMMAND_CATEGORY_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
     ("test", re.compile(r"\b(pytest|tox|nox|unittest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|make\s+test)\b")),
     ("typecheck", re.compile(r"\b(mypy|pyright|tsc|typecheck|type-check|type\s+check)\b")),
@@ -320,7 +332,7 @@ def _discover_package_json_gates(repo: Path, files: Sequence[str], gates: List[G
         if not isinstance(command, str):
             continue
         lowered = name.lower()
-        if any(key in lowered for key in _SCRIPT_NAMES):
+        if _name_matches_script(lowered):
             manager = _node_manager(files)
             run_cmd = f"{manager} run {name}" if name not in {"test"} or manager != "npm" else "npm test"
             _add_gate(gates, run_cmd, "package.json", f"package.json script `{name}` maps to `{command}`.")
@@ -338,7 +350,7 @@ def _discover_make_gates(repo: Path, files: Sequence[str], gates: List[Gate]) ->
             continue
         target = match.group(1)
         lowered = target.lower()
-        if any(key in lowered for key in _SCRIPT_NAMES):
+        if _name_matches_script(lowered):
             _add_gate(gates, f"make {target}", "Makefile", f"Makefile target `{target}` was found.")
 
 
@@ -1494,7 +1506,7 @@ def render_recommendations(audit: Dict[str, Any]) -> str:
         ])
     if hypotheses:
         lines.extend([
-            "## Loop Hypotheses",
+            "## Automation Leads (intake -- a lead is not a loop until it qualifies)",
             "",
             "These are creative opportunities inferred from repo signals. Treat them as discovery leads, not verified loop designs.",
             "",
@@ -1532,7 +1544,7 @@ def render_recommendations(audit: Dict[str, Any]) -> str:
         f"- Strong gates: {audit['summary']['gate_counts']['strong']}",
         f"- Medium gates: {audit['summary']['gate_counts']['medium']}",
         f"- Weak gates: {audit['summary']['gate_counts']['weak']}",
-        f"- Loop hypotheses: {audit['summary'].get('hypothesis_count', 0)}",
+        f"- Automation leads: {audit['summary'].get('hypothesis_count', 0)}",
         "",
         "## Surface Summary",
         "",
@@ -1597,8 +1609,9 @@ def write_audit_outputs(audit: Dict[str, Any], out_dir: str) -> Dict[str, str]:
         "repo_audit": root / "repo-audit.json",
         "gate_inventory": root / "gate-inventory.json",
         "repo_surfaces": root / "repo-surfaces.json",
-        "loop_hypotheses": root / "loop-hypotheses.json",
         "automation_candidates": root / "automation-candidates.json",
+        "automation_leads": root / "automation-leads.json",
+        "loop_hypotheses": root / "loop-hypotheses.json",
         "ranked_backlog": root / "ranked-backlog.md",
         "recommendations": root / "recommendations.md",
     }
@@ -1620,10 +1633,17 @@ def write_audit_outputs(audit: Dict[str, Any], out_dir: str) -> Dict[str, str]:
         "repo": audit["repo"],
         "candidates": audit["automation_candidates"],
     })
-    _json_write(outputs["loop_hypotheses"], {
+    leads = [candidate for candidate in audit["automation_candidates"] if candidate.get("hypothesis")]
+    _json_write(outputs["automation_leads"], {
         "schema_version": audit["schema_version"],
         "repo": audit["repo"],
-        "hypotheses": [candidate for candidate in audit["automation_candidates"] if candidate.get("hypothesis")],
+        "note": "Automation leads are intake -- a lead becomes a loop only by passing core qualification.",
+        "leads": leads,
+    })
+    _json_write(outputs["loop_hypotheses"], {  # back-compat alias for one release
+        "schema_version": audit["schema_version"],
+        "repo": audit["repo"],
+        "hypotheses": leads,
     })
     outputs["ranked_backlog"].write_text(render_ranked_backlog(audit), encoding="utf-8")
     outputs["recommendations"].write_text(render_recommendations(audit), encoding="utf-8")

@@ -128,7 +128,9 @@ run_loop(spec, *, propose, verify, store, clock=...) -> RunResult
 
 ---
 
-## 2.5 — Repo audit becomes a *qualifying adapter*  *(was 2.5 + 2.6, merged · same module · folds in #9)*
+## 2.5 — Repo audit becomes a *qualifying adapter* ✅ DONE  *(was 2.5 + 2.6, merged · folds in #9)*
+
+> **Status:** ✅ **#9** word-boundary matching (`latest` no longer matches `test`; hyphenated keys like `type-check` still match — TDD). ✅ **"automation lead" rename**: `automation-leads.json` (content keyed `leads`, with an "intake — not a loop until it qualifies" note) + `loop-hypotheses.json` kept as a back-compat alias; report heading is now "Automation Leads (intake…)". ✅ **promotion requires qualification** was already in place and tested — `promote_candidate` emits `design/loop.json` only when `build_spec` returns a spec (an `AUTONOMOUS_LOOP` verdict); a hypothesis/unqualified lead yields a discovery packet (`test_repo_promote_keeps_hypotheses_as_discovery_packets`). *(Deferred to close-out: the README / `repo-discovery.md` "loop hypotheses" prose, folded into the README re-lead. Optional: the deeper "category from command body" parse stays F4.)*
 
 **Goal:** identity = summonable intake that *feeds the core*; the core, not static evidence, decides what becomes a loop.
 
