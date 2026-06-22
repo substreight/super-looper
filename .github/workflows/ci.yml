@@ -40,6 +40,12 @@ jobs:
       - name: Run skill-eval runner tests
         run: python scripts/test_run_skill_eval.py
 
+      - name: Run loop-driver tests
+        run: python scripts/test_runtime.py
+
+      - name: Run CLI lazy-import isolation test
+        run: python scripts/test_cli_lazy.py
+
       - name: Scorer self-test (frozen sample - NOT the skill gate)
         run: python evals/score_eval.py evals/scenarios.jsonl evals/results.sample.jsonl --min 0.8
 

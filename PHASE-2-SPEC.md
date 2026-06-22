@@ -93,7 +93,7 @@ if execution.untrusted is not True and _looks_untrusted(spec):
 
 ## 2.4 — Extract the deterministic loop *driver* (core); quarantine the rest  *(after 2.3 · folds in #7 · reverses red-team adj. #4)*
 
-> **Status:** ✅ **driver + #7 + `super-looper run` CLI done** (TDD: `runtime.py`, 7 driver tests; #7 fail-closed in `summarize_run`; `run` smoke-verified end-to-end). ⏳ **Remaining:** quarantine the `case_study` repo/diff/mini-CI harness into `experimental/` (the mechanical relocation — pairs with 2.2's lazy imports).
+> **Status:** ✅ **driver + #7 + `super-looper run` CLI done** (TDD: `runtime.py`, 7 driver tests; #7 fail-closed in `summarize_run`; `run` smoke-verified). ✅ **harness quarantine done** (see 2.2 below: `case_study` + `remote_runner` relocated to `experimental/`).
 
 **Goal:** the loop's deterministic control flow is the unique primitive — pull it out of the case-study harness (and out of any prompt) into a tiny **core** driver. The one place Phase 2 *adds* to the center; it's what "make the loop first-class" means.
 
@@ -145,7 +145,9 @@ run_loop(spec, *, propose, verify, store, clock=...) -> RunResult
 
 ---
 
-## 2.2 — Quarantine the runner transport  *(last · folds in lazy CLI imports; closes #12/#13 by relegation)*
+## 2.2 — Quarantine the runner transport  *(folds in lazy CLI imports; closes #12/#13 by relegation)*
+
+> **Status:** ✅ **relocation + lazy imports DONE** (with 2.4's harness quarantine): `case_study.py` and `remote_runner.py` moved to `super_looper/experimental/`; thin back-compat shims at the old import paths; all 12 perimeter CLI handlers lazy-import their module so `validate`/`run`/`explain`/`max-autonomy` load **none** of them (`test_cli_lazy` proves it in a subprocess). ⏳ **Remaining 2.2:** strip the asserted-but-unenforced security controls (#12 unconditional "network disabled" / #13 metadata-only allowlist) from the emitted runner plan, and (optional) move the `runner`/heavy `case-study` CLI verbs under an `experimental` namespace.
 
 **Goal:** stop presenting bespoke SSH/container orchestration as the product.
 

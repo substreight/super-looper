@@ -6,26 +6,12 @@ import os
 import sys
 
 from . import __version__
-from .case_study import (
-    CaseStudyError,
-    create_manifest,
-    design_case_study,
-    render_report,
-    resolve_verifier,
-    run_case_study,
-    simulate_sketch_verifier,
-    verify_run,
-    write_reports,
-)
 from .design import build_spec, command_questions, read_answers
-from .remote_runner import (
-    RemoteRunnerError,
-    build_bootstrap_plan,
-    build_remote_runner_plan,
-    create_runner_key,
-)
-from .repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs
 from .validate import max_autonomy, render, render_plain, validate
+
+# Perimeter subsystems -- the case-study harness, the remote-runner transport, and the
+# repo-audit adapter -- are imported LAZILY inside their own handlers so the minimal path
+# (validate / run / explain / max-autonomy / interview) never loads them. See SCOPE.md.
 
 
 def _load_json(path):
@@ -185,6 +171,7 @@ def cmd_max_autonomy(args):
 
 
 def cmd_case_study_init(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     try:
         result = create_manifest(
             args.out,
@@ -205,6 +192,7 @@ def cmd_case_study_init(args):
 
 
 def cmd_case_study_design(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     try:
         result = design_case_study(args.manifest)
     except CaseStudyError as exc:
@@ -216,6 +204,7 @@ def cmd_case_study_design(args):
 
 
 def cmd_case_study_run(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     try:
         result = run_case_study(
             args.manifest,
@@ -234,6 +223,7 @@ def cmd_case_study_run(args):
 
 
 def cmd_case_study_simulate_verifier(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     try:
         result = simulate_sketch_verifier(
             args.manifest,
@@ -252,6 +242,7 @@ def cmd_case_study_simulate_verifier(args):
 
 
 def cmd_case_study_resolve_verifier(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     try:
         result = resolve_verifier(
             args.manifest,
@@ -273,12 +264,14 @@ def cmd_case_study_resolve_verifier(args):
 
 
 def cmd_case_study_verify(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     result = verify_run(args.run_dir)
     print(json.dumps(result, indent=2))
     return 0 if result.get("passed") else 1
 
 
 def cmd_case_study_report(args):
+    from .experimental.case_study import CaseStudyError, create_manifest, design_case_study, render_report, resolve_verifier, run_case_study, simulate_sketch_verifier, verify_run, write_reports  # noqa: F401
     if args.print_report:
         print(render_report(args.run_dir, args.for_audience))
         return 0
@@ -289,6 +282,7 @@ def cmd_case_study_report(args):
 
 
 def cmd_runner_plan(args):
+    from .experimental.remote_runner import RemoteRunnerError, build_bootstrap_plan, build_remote_runner_plan, create_runner_key  # noqa: F401
     try:
         profile = _load_json(args.profile) if args.profile else {}
         remote = args.remote or _profile_value(profile, "remote")
@@ -328,6 +322,7 @@ def cmd_runner_plan(args):
 
 
 def cmd_runner_keygen(args):
+    from .experimental.remote_runner import RemoteRunnerError, build_bootstrap_plan, build_remote_runner_plan, create_runner_key  # noqa: F401
     try:
         result = create_runner_key(
             name=args.name,
@@ -345,6 +340,7 @@ def cmd_runner_keygen(args):
 
 
 def cmd_runner_bootstrap_plan(args):
+    from .experimental.remote_runner import RemoteRunnerError, build_bootstrap_plan, build_remote_runner_plan, create_runner_key  # noqa: F401
     try:
         plan = build_bootstrap_plan(
             provider=args.provider,
@@ -372,6 +368,7 @@ def cmd_runner_bootstrap_plan(args):
 
 
 def cmd_repo_audit(args):
+    from .repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs  # noqa: F401
     try:
         result = audit_repo(args.repo_path, max_files=args.max_files)
         outputs = write_audit_outputs(result, args.out) if args.out else {}
@@ -417,6 +414,7 @@ def cmd_repo_audit(args):
 
 
 def cmd_repo_promote(args):
+    from .repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs  # noqa: F401
     try:
         result = promote_candidate(
             audit_path=args.audit,
