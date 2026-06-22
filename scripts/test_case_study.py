@@ -13,7 +13,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from super_looper.case_study import (  # noqa: E402
+from super_looper.experimental.case_study import (  # noqa: E402
     check_scope,
     create_manifest,
     design_case_study,
@@ -316,7 +316,7 @@ def test_resolve_verifier_pathless_command_is_unconfirmed():
 
 def test_absent_run_dir_is_missing_evidence():
     # #7: a run dir with no verifier results must fail closed to "missing", never "confirmed_local".
-    from super_looper.case_study import summarize_run
+    from super_looper.experimental.case_study import summarize_run
     with open(os.path.join(ROOT, "examples", "nightly-export.loop.json")) as f:
         loop = json.load(f)
     with tempfile.TemporaryDirectory() as run_dir:
@@ -329,7 +329,7 @@ def test_absent_run_dir_is_missing_evidence():
 
 def test_simulate_shadow_verifier_alias_still_importable():
     # Back-compat: the old "shadow" name remains importable and is the renamed sketch function.
-    from super_looper.case_study import simulate_shadow_verifier, simulate_sketch_verifier
+    from super_looper.experimental.case_study import simulate_shadow_verifier, simulate_sketch_verifier
     assert simulate_shadow_verifier is simulate_sketch_verifier
 
 

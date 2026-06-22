@@ -23,7 +23,7 @@ Whether a fresh agent, given only the skill and a request (blind to the answer),
    A scenario passes if its verdict is in the accepted set **and** the rationale mentions at least one expected concept. Exit code is nonzero if accuracy drops below `--min`.
 
 ## The gate rule
-- Accuracy must stay at or above the baseline (`baseline.json`), and **no previously-passing scenario may regress.** If an edit breaks a scenario, either the edit is wrong or the scenario is — decide deliberately, don't just lower the bar.
+- Accuracy must stay at or above the baseline (`baseline.json`), and **no previously-passing scenario may regress.** This is now enforced, not just documented: pass `--baseline evals/baseline.json` and the scorer exits nonzero if any id in the baseline's `passing_ids` fails now, even when overall accuracy still clears `--min`. If an edit breaks a scenario, either the edit is wrong or the scenario is — decide deliberately, don't just lower the bar.
 - When you find a new failure mode in the wild, **add it as a scenario.** That's how `calendar-email` (the scheduler-vs-loop case) entered the set after a blind agent mislabeled it. The set is meant to grow.
 
 ## Deeper check (optional)

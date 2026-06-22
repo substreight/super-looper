@@ -12,7 +12,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from super_looper.remote_runner import (  # noqa: E402
+from super_looper.experimental.remote_runner import (  # noqa: E402
     RemoteRunnerError,
     build_bootstrap_plan,
     build_remote_runner_plan,

@@ -14,7 +14,7 @@ AND (must_mention is empty OR the rationale contains at least one of those conce
 A scenario with no matching result is MISSING (counts as a fail).
 
 Usage:
-    python score_eval.py scenarios.jsonl results.jsonl [--min 0.8]
+    python score_eval.py scenarios.jsonl results.jsonl [--min 0.8] [--baseline baseline.json]
 """
 import json
 import sys
@@ -57,7 +57,7 @@ def score(scenarios, results):
 
 
 def _parse_args(argv):
-    rest, args, min_acc = argv[1:], [], 0.8
+    rest, args, min_acc, baseline = argv[1:], [], 0.8, None
     i = 0
     while i < len(rest):
         a = rest[i]
@@ -65,12 +65,33 @@ def _parse_args(argv):
             min_acc = float(rest[i + 1]); i += 2; continue
         if a.startswith("--min="):
             min_acc = float(a.split("=", 1)[1]); i += 1; continue
+        if a == "--baseline":
+            baseline = rest[i + 1]; i += 2; continue
+        if a.startswith("--baseline="):
+            baseline = a.split("=", 1)[1]; i += 1; continue
         args.append(a); i += 1
-    return args, min_acc
+    return args, min_acc, baseline
+
+
+def _baseline_passing_ids(path):
+    """Return the set of scenario ids that passed at the recorded baseline.
+
+    Accepts either an explicit ``passing_ids`` list or, failing that, an empty
+    set (so an older baseline without ids simply imposes no per-scenario floor).
+    """
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return set(data.get("passing_ids") or [])
+
+
+def regressions(report, baseline_ids):
+    """Scenario ids that passed at baseline but fail now -- the no-regression gate."""
+    now_passing = {sid for sid, ok, _ in report if ok}
+    return sorted(baseline_ids - now_passing)
 
 
 def main(argv):
-    args, min_acc = _parse_args(argv)
+    args, min_acc, baseline = _parse_args(argv)
     if len(args) < 2:
         print(__doc__)
         return 2
@@ -81,10 +102,21 @@ def main(argv):
         print(f"{'PASS' if ok else 'FAIL'}  {sid:<20}{'' if ok else '  - ' + why}")
     acc = passed / total if total else 0.0
     print(f"\naccuracy: {passed}/{total} = {acc:.0%}  (min required {min_acc:.0%})")
+    failed = False
     if acc < min_acc:
         print("FAILED: below required accuracy - the skill regressed.", file=sys.stderr)
-        return 1
-    return 0
+        failed = True
+    if baseline:
+        regressed = regressions(report, _baseline_passing_ids(baseline))
+        if regressed:
+            print(
+                "FAILED: previously-passing scenario(s) regressed: " + ", ".join(regressed),
+                file=sys.stderr,
+            )
+            failed = True
+        else:
+            print("no-regression check: OK (no previously-passing scenario regressed)")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

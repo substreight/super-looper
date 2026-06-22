@@ -160,6 +160,84 @@ def unknown_report(answers, missing):
     }
 
 
+def render_decision(report, spec=None):
+    """Human-first verdict card for `super-looper decide`.
+
+    The interview/compiler can still emit JSON for tooling, but the default UX
+    should tell a person what happened, why, the safe autonomy level, and the next
+    concrete step without requiring them to read a nested object.
+    """
+    verdict = report.get("verdict", "UNKNOWN")
+    task = report.get("task") or "the proposed task"
+    autonomy = report.get("autonomy") or report.get("max_autonomy") or "L0"
+    lines = [verdict.replace("_", " ")]
+    lines.append("")
+    lines.append("Task:")
+    lines.append(f"  {task}")
+    lines.append("")
+    lines.append("Safe autonomy:")
+    lines.append(f"  {autonomy}")
+
+    rationale = report.get("rationale") or []
+    if rationale:
+        lines.append("")
+        lines.append("Why:")
+        for item in rationale:
+            lines.append(f"  - {item}")
+
+    if report.get("gate"):
+        lines.append("")
+        lines.append("Gate:")
+        lines.append(f"  {report['gate']}")
+
+    open_questions = report.get("open_questions") or []
+    if open_questions:
+        lines.append("")
+        lines.append("Answer before continuing:")
+        for i, item in enumerate(open_questions, 1):
+            lines.append(f"  {i}. {item}")
+
+    missing = report.get("missing_for_more_autonomy") or []
+    if missing:
+        lines.append("")
+        lines.append("To earn more autonomy:")
+        for item in missing:
+            lines.append(f"  - {item}")
+
+    plan = report.get("discovery_plan") or []
+    if plan:
+        lines.append("")
+        lines.append("Next discovery steps:")
+        for i, item in enumerate(plan, 1):
+            lines.append(f"  {i}. {item}")
+    elif spec is not None:
+        lines.append("")
+        lines.append("Next:")
+        lines.append("  super-looper check <loop.json>")
+
+    alternative = report.get("alternative")
+    if alternative:
+        lines.append("")
+        lines.append("Better path:")
+        lines.append(f"  {alternative}")
+
+    validation = report.get("validation") or {}
+    errors = validation.get("errors") or []
+    warnings = validation.get("warnings") or []
+    if warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for item in warnings:
+            lines.append(f"  ! {item}")
+    if errors:
+        lines.append("")
+        lines.append("Errors:")
+        for item in errors:
+            lines.append(f"  x {item}")
+
+    return "\n".join(lines)
+
+
 def classify_answers(answers):
     """Return a verdict report. Never guesses through unknown critical fields."""
     critical = []

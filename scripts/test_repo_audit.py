@@ -12,9 +12,10 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from super_looper.cli import main as cli_main  # noqa: E402
-from super_looper.repo_audit import (  # noqa: E402
+from super_looper.experimental.repo_audit import (  # noqa: E402
     audit_repo,
     default_promotion_out_dir,
+    verify_gate_inventory,
     _add_gate,
     _classify_command,
     _consolidate_gates,
@@ -213,6 +214,50 @@ def test_repo_audit_writes_reviewable_artifacts_and_cli_summary():
 
     assert audit["mode"] == "repo-automation-discovery"
     assert audit["automation_candidates"][0]["score"]["total"] >= audit["automation_candidates"][-1]["score"]["total"]
+
+
+def test_verify_gate_inventory_records_pass_fail_and_skips_unsafe():
+    with tempfile.TemporaryDirectory() as repo:
+        gates = [
+            {
+                "id": "gate-pass",
+                "command": f"{sys.executable} -c \"raise SystemExit(0)\"",
+                "requires_network": False,
+                "destructive": False,
+            },
+            {
+                "id": "gate-fail",
+                "command": f"{sys.executable} -c \"raise SystemExit(7)\"",
+                "requires_network": False,
+                "destructive": False,
+            },
+            {
+                "id": "gate-network",
+                "command": f"{sys.executable} -c \"raise SystemExit(0)\"",
+                "requires_network": True,
+                "destructive": False,
+            },
+        ]
+        verified = verify_gate_inventory(repo, gates, timeout_seconds=10)
+    by_id = {gate["id"]: gate["verification"] for gate in verified}
+    assert by_id["gate-pass"]["status"] == "passed"
+    assert by_id["gate-pass"]["exit_code"] == 0
+    assert by_id["gate-fail"]["status"] == "failed"
+    assert by_id["gate-fail"]["exit_code"] == 7
+    assert by_id["gate-network"]["status"] == "skipped_requires_network"
+
+
+def test_repo_audit_verify_gates_confirms_discovered_pytest_gate():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        _write(repo, "tests/test_pkg.py", "def test_pkg():\n    assert True\n")
+        _write(repo, "pyproject.toml", "[tool.pytest.ini_options]\n")
+        audit = audit_repo(repo, verify_gates=True, gate_timeout_seconds=30)
+    counts = audit["summary"]["gate_verification_counts"]
+    assert counts.get("passed", 0) >= 1
+    pytest_gate = next(g for g in audit["gate_inventory"] if g["command"] == "python -m pytest")
+    assert pytest_gate["verification"]["status"] == "passed"
 
 
 def test_repo_promote_writes_clean_case_study_taxonomy_for_static_candidate():
@@ -474,6 +519,27 @@ def test_repo_promote_with_answers_supplement_qualifies_to_loop():
         with open(os.path.join(promote_dir, "inputs", "promotion.json"), encoding="utf-8") as f:
             promotion = json.load(f)
         assert promotion["design_verdict"] == "AUTONOMOUS_LOOP", promotion
+
+
+def test_repo_audit_lives_in_experimental_and_top_level_shim_is_removed():
+    """0.7.0 finished the relegation AND dropped the expired shims: the engine lives
+    under experimental/, and the old top-level module no longer exists. New code must
+    import from super_looper.experimental.repo_audit."""
+    import importlib
+
+    canonical = importlib.import_module("super_looper.experimental.repo_audit")
+    assert hasattr(canonical, "audit_repo")
+
+    # The expired 0.6.x back-compat shim must be gone in 0.7.0.
+    try:
+        importlib.import_module("super_looper.repo_audit")
+    except ImportError:
+        pass
+    else:
+        raise AssertionError(
+            "super_looper.repo_audit shim should be removed in 0.7.0; import from "
+            "super_looper.experimental.repo_audit instead"
+        )
 
 
 def _run_all():

@@ -28,6 +28,15 @@ jobs:
       - name: Run compiler tests
         run: python scripts/test_design_loop.py
 
+      - name: Run core CLI tests
+        run: python scripts/test_cli.py
+
+      - name: Run scorer tests (no-regression gate)
+        run: python scripts/test_score_eval.py
+
+      - name: Run release hygiene tests
+        run: python scripts/test_release_hygiene.py
+
       - name: Install pytest (the case-study harness shells out to `python -m pytest` as a verifier)
         run: python -m pip install pytest
 
@@ -49,19 +58,43 @@ jobs:
       - name: Run CLI lazy-import isolation test
         run: python scripts/test_cli_lazy.py
 
-      - name: Scorer self-test (frozen sample - NOT the skill gate)
-        run: python evals/score_eval.py evals/scenarios.jsonl evals/results.sample.jsonl --min 0.8
+      - name: Scorer self-test + no-regression gate (frozen sample - NOT the skill gate)
+        run: python evals/score_eval.py evals/scenarios.jsonl evals/results.sample.jsonl --min 0.8 --baseline evals/baseline.json
 
       - name: Install package
-        run: python -m pip install .
+        run: |
+          python scripts/clean_release_artifacts.py --yes
+          python -m pip install .
 
       - name: Smoke test packaged CLI
         run: |
           super-looper --version
+          super-looper doctor
+          super-looper decide --answers examples/unknown-gate.answers.json
           super-looper validate examples/nightly-export.loop.json --strict
+          super-looper check examples/nightly-export.loop.json
+          super-looper check examples/nightly-export.loop.json --json
           super-looper explain examples/nightly-export.loop.json --validate --strict
           super-looper max-autonomy examples/nightly-export.loop.json --json
           super-looper interview --answers examples/unknown-gate.answers.json
+          super-looper lab repo audit --repo-path . --verify-gates --gate-timeout-seconds 60
+
+      - name: Assert expired top-level shims are gone (0.7.0 breaking change)
+        run: |
+          python - <<'PY'
+          import importlib
+          for name in ("super_looper.repo_audit", "super_looper.case_study", "super_looper.remote_runner"):
+              try:
+                  importlib.import_module(name)
+              except ImportError:
+                  continue
+              raise SystemExit(f"{name} should be removed in 0.7.0; import from super_looper.experimental.* instead")
+          # canonical paths must still work
+          import super_looper.experimental.repo_audit  # noqa: F401
+          import super_looper.experimental.case_study  # noqa: F401
+          import super_looper.experimental.remote_runner  # noqa: F401
+          print("shims removed; experimental imports OK")
+          PY
 
   skill-eval:
     # The REAL skill gate: run SKILL.md blind over each scenario and score the LIVE output,
@@ -104,7 +137,10 @@ jobs:
 
       - name: Score the live skill run (the gate)
         if: steps.guard.outputs.have_key == 'true'
-        run: python evals/score_eval.py evals/scenarios.jsonl results.live.jsonl --min 0.8
+        # Live model output is non-deterministic, so the per-scenario --baseline
+        # no-regression gate (which would demand all 10 every run) is reserved for
+        # the deterministic self-test. Here we raise the accuracy floor to 0.9.
+        run: python evals/score_eval.py evals/scenarios.jsonl results.live.jsonl --min 0.9
 
       - name: Upload live results
         if: steps.guard.outputs.have_key == 'true'

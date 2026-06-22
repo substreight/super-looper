@@ -6,8 +6,8 @@ import os
 import sys
 
 from . import __version__
-from .design import build_spec, command_questions, read_answers
-from .validate import max_autonomy, render, render_plain, validate
+from .design import build_spec, command_questions, read_answers, render_decision
+from .validate import max_autonomy, render, render_check, render_plain, validate
 
 # Perimeter subsystems -- the case-study harness, the remote-runner transport, and the
 # repo-audit adapter -- are imported LAZILY inside their own handlers so the minimal path
@@ -71,6 +71,31 @@ def cmd_interview(args):
     return 1 if report.get("validation", {}).get("errors") else 0
 
 
+def cmd_decide(args):
+    """Human-first alias for the interview compiler: decide whether this is a loop."""
+    answers = read_answers(args.answers) if args.answers else None
+    if answers is None:
+        from .design import ask_interactive
+
+        answers = ask_interactive()
+    spec, report = build_spec(answers)
+    result = {"report": report}
+    if spec is not None:
+        result["spec"] = spec
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                json.dump(spec, f, indent=2)
+                f.write("\n")
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(render_decision(report, spec))
+        if spec is not None and args.out:
+            print("")
+            print(f"Wrote spec: {args.out}")
+    return 1 if report.get("validation", {}).get("errors") else 0
+
+
 def cmd_validate(args):
     spec = _load_json(args.spec)
     errors, warnings = validate(spec)
@@ -79,6 +104,29 @@ def cmd_validate(args):
     if rc == 0:
         print(f"OK: valid loop spec ({len(warnings)} warning(s))")
     return rc
+
+
+def cmd_check(args):
+    """The everyday command: validate + explain + autonomy verdict in one card.
+    Human-first by default; --json emits the structured result for tooling."""
+    spec = _load_json(args.spec)
+    errors, warnings = validate(spec)
+    level, missing = max_autonomy(spec)
+    if args.json:
+        requested = (spec.get("autonomy") or {}).get("requested") if isinstance(spec.get("autonomy"), dict) else None
+        print(json.dumps({
+            "name": spec.get("name"),
+            "ok": not errors and not (args.strict and warnings),
+            "errors": errors,
+            "warnings": warnings,
+            "requested_autonomy": requested,
+            "max_autonomy": level,
+            "missing_for_more_autonomy": missing,
+            "plain": render_plain(spec) if not errors else None,
+        }, indent=2))
+    else:
+        print(render_check(spec, errors, warnings))
+    return _exit_code(errors, warnings, args.strict)
 
 
 def cmd_run(args):
@@ -168,6 +216,64 @@ def cmd_max_autonomy(args):
         for item in missing:
             print(f"- {item}")
     return 0
+
+
+def _perimeter_modules_loaded():
+    return sorted(
+        m for m in sys.modules
+        if m.startswith("super_looper.experimental")
+        or m in ("super_looper.repo_audit", "super_looper.case_study", "super_looper.remote_runner")
+    )
+
+
+def cmd_doctor(args):
+    """No-network sanity check for the core install and golden-path example."""
+    import importlib.util
+
+    example = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "examples", "nightly-export.loop.json")
+    if not os.path.exists(example):
+        # Packaged installs won't ship examples; fall back to a bundled-ish smoke status instead
+        # of failing the whole doctor command.
+        example = None
+    payload = {
+        "version": __version__,
+        "python": sys.version.split()[0],
+        "package_file": __file__,
+        "jsonschema_available": importlib.util.find_spec("jsonschema") is not None,
+        "example_check": "not_found",
+        "perimeter_modules_loaded": _perimeter_modules_loaded(),
+    }
+    if example:
+        spec = _load_json(example)
+        errors, warnings = validate(spec)
+        payload["example_check"] = "passed" if not errors else "failed"
+        payload["example_errors"] = errors
+        payload["example_warnings"] = warnings
+        payload["example_max_autonomy"] = max_autonomy(spec)[0]
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print("SUPER-LOOPER DOCTOR")
+        print(f"version: {payload['version']}")
+        print(f"python: {payload['python']}")
+        print(f"package: {payload['package_file']}")
+        print(f"jsonschema: {'available' if payload['jsonschema_available'] else 'not installed (built-in validator will be used)'}")
+        print(f"example check: {payload['example_check']}")
+        if payload.get("example_max_autonomy"):
+            print(f"example max autonomy: {payload['example_max_autonomy']}")
+        loaded = payload["perimeter_modules_loaded"]
+        print("perimeter loaded in this process: " + (", ".join(loaded) if loaded else "none"))
+    return 0 if payload["example_check"] in ("passed", "not_found") else 1
+
+
+def cmd_lab(args):
+    """Compatibility dispatcher for the 0.7 lab namespace.
+
+    The actual perimeter handlers remain lazy and unchanged; `lab` just makes the
+    product hierarchy obvious while old top-level commands continue to work.
+    """
+    return main([args.lab_command, *args.lab_args])
 
 
 def cmd_case_study_init(args):
@@ -368,9 +474,16 @@ def cmd_runner_bootstrap_plan(args):
 
 
 def cmd_repo_audit(args):
-    from .repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs  # noqa: F401
+    from .experimental.repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs  # noqa: F401
     try:
-        result = audit_repo(args.repo_path, max_files=args.max_files)
+        result = audit_repo(
+            args.repo_path,
+            max_files=args.max_files,
+            verify_gates=args.verify_gates,
+            gate_timeout_seconds=args.gate_timeout_seconds,
+            allow_network_gates=args.allow_network_gates,
+            allow_destructive_gates=args.allow_destructive_gates,
+        )
         outputs = write_audit_outputs(result, args.out) if args.out else {}
     except RepoAuditError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -390,6 +503,15 @@ def cmd_repo_audit(args):
             f"{summary['gate_counts']['medium']} medium, "
             f"{summary['gate_counts']['weak']} weak"
         )
+        if args.verify_gates:
+            counts = summary.get("gate_verification_counts", {})
+            print(
+                "verified gates: "
+                f"{counts.get('passed', 0)} passed, "
+                f"{counts.get('failed', 0)} failed, "
+                f"{counts.get('timeout', 0)} timed out, "
+                f"{counts.get('skipped_requires_network', 0) + counts.get('skipped_destructive', 0)} skipped"
+            )
         print("candidates:")
         for candidate in [item for item in result["automation_candidates"] if not item.get("hypothesis")][:8]:
             print(
@@ -414,7 +536,7 @@ def cmd_repo_audit(args):
 
 
 def cmd_repo_promote(args):
-    from .repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs  # noqa: F401
+    from .experimental.repo_audit import RepoAuditError, audit_repo, promote_candidate, write_audit_outputs  # noqa: F401
     try:
         result = promote_candidate(
             audit_path=args.audit,
@@ -437,7 +559,10 @@ def cmd_repo_promote(args):
 def build_parser():
     parser = argparse.ArgumentParser(prog="super-looper", description="Design and validate agentic loop specs.")
     parser.add_argument("--version", action="version", version=f"super-looper {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(
+        dest="command",
+        metavar="{questions,interview,decide,validate,check,render,explain,max-autonomy,run,doctor,lab}",
+    )
 
     questions = sub.add_parser("questions", help="print the interview question keys")
     questions.set_defaults(func=cmd_questions)
@@ -447,10 +572,22 @@ def build_parser():
     interview.add_argument("--out", help="write generated loop spec here when verdict is AUTONOMOUS_LOOP")
     interview.set_defaults(func=cmd_interview)
 
+    decide = sub.add_parser("decide", help="human-first interview: decide whether this should be a loop")
+    decide.add_argument("--answers", help="JSON file with interview answers")
+    decide.add_argument("--out", help="write generated loop spec here when verdict is AUTONOMOUS_LOOP")
+    decide.add_argument("--json", action="store_true", help="print structured JSON instead of the verdict card")
+    decide.set_defaults(func=cmd_decide)
+
     validate_cmd = sub.add_parser("validate", help="validate a JSON loop spec")
     validate_cmd.add_argument("spec")
     validate_cmd.add_argument("--strict", action="store_true", help="treat warnings as errors")
     validate_cmd.set_defaults(func=cmd_validate)
+
+    check_cmd = sub.add_parser("check", help="validate + explain + autonomy verdict in one human-first card")
+    check_cmd.add_argument("spec")
+    check_cmd.add_argument("--strict", action="store_true", help="treat warnings as errors")
+    check_cmd.add_argument("--json", action="store_true", help="print structured JSON instead of the card")
+    check_cmd.set_defaults(func=cmd_check)
 
     render_cmd = sub.add_parser("render", help="render a JSON loop spec as the canonical text form")
     render_cmd.add_argument("spec")
@@ -475,13 +612,26 @@ def build_parser():
     run_cmd.add_argument("--state", help="durable state JSON file (default: spec.state.durable_progress[0])")
     run_cmd.set_defaults(func=cmd_run)
 
-    repo = sub.add_parser("repo", help="discover repo-native gates and automation candidates")
+    doctor = sub.add_parser("doctor", help="sanity-check the core install and golden-path example")
+    doctor.add_argument("--json", action="store_true", help="print structured JSON")
+    doctor.set_defaults(func=cmd_doctor)
+
+    lab = sub.add_parser("lab", help="experimental perimeter tooling: repo audit, case studies, runners")
+    lab.add_argument("lab_command", choices=["repo", "case-study", "runner"], help="lab subsystem to dispatch")
+    lab.add_argument("lab_args", nargs=argparse.REMAINDER, help="arguments for the selected lab subsystem")
+    lab.set_defaults(func=cmd_lab)
+
+    repo = sub.add_parser("repo", help=argparse.SUPPRESS)
     repo_sub = repo.add_subparsers(dest="repo_command", required=True)
 
     repo_audit = repo_sub.add_parser("audit", help="rank conservative automation candidates for a local repository")
     repo_audit.add_argument("--repo-path", required=True, help="local repository checkout to audit")
     repo_audit.add_argument("--out", help="directory for repo-audit.json, gate inventory, surfaces, loop hypotheses, backlog, and recommendations")
     repo_audit.add_argument("--max-files", type=int, default=50000, help="maximum repository files to index")
+    repo_audit.add_argument("--verify-gates", action="store_true", help="run discovered gate commands and record pass/fail evidence")
+    repo_audit.add_argument("--gate-timeout-seconds", type=int, default=60, help="timeout per gate when --verify-gates is enabled")
+    repo_audit.add_argument("--allow-network-gates", action="store_true", help="with --verify-gates, allow gates that appear to install/fetch dependencies")
+    repo_audit.add_argument("--allow-destructive-gates", action="store_true", help="with --verify-gates, allow gates that look destructive")
     repo_audit.add_argument("--json", action="store_true", help="print full JSON audit")
     repo_audit.set_defaults(func=cmd_repo_audit)
 
@@ -504,7 +654,7 @@ def build_parser():
     repo_promote.add_argument("--answers", help="JSON of human answers to supplement the lead (fills gaps a static scan can't know, so a borderline lead can qualify)")
     repo_promote.set_defaults(func=cmd_repo_promote)
 
-    case = sub.add_parser("case-study", help="create, run, and report real-repo loop case studies")
+    case = sub.add_parser("case-study", help=argparse.SUPPRESS)
     case_sub = case.add_subparsers(dest="case_command", required=True)
 
     case_init = case_sub.add_parser("init", help="create a case-study manifest directory")
@@ -558,7 +708,7 @@ def build_parser():
     case_report.add_argument("--print", dest="print_report", action="store_true", help="print report markdown instead of writing files")
     case_report.set_defaults(func=cmd_case_study_report)
 
-    runner = sub.add_parser("runner", help="plan isolated case-study execution on remote runners")
+    runner = sub.add_parser("runner", help=argparse.SUPPRESS)
     runner_sub = runner.add_subparsers(dest="runner_command", required=True)
 
     runner_keygen = runner_sub.add_parser("keygen", help="create a dedicated runner SSH keypair")
@@ -626,12 +776,53 @@ def build_parser():
     runner_plan.add_argument("--out", help="write the JSON plan to this path")
     runner_plan.set_defaults(func=cmd_runner_plan)
 
+    # Keep the old top-level perimeter commands parseable for compatibility, but
+    # hide them from the main help surface so new users see the 0.7 hierarchy:
+    # core commands at top level, experimental tooling under `lab`.
+    if hasattr(sub, "_choices_actions"):
+        sub._choices_actions = [
+            action for action in sub._choices_actions
+            if getattr(action, "dest", None) not in {"repo", "case-study", "runner"}
+        ]
+
     return parser
+
+
+GOLDEN_PATH = """\
+Super Looper designs safe agentic loops -- and says no to the ones that shouldn't run.
+
+Most proposed loops are net-negative: they spin, drift, or confidently ship wrong work.
+So the first job is to decide whether a loop has a real gate at all.
+
+Start here:
+  super-looper decide --answers answers.json       # decide: is this even a loop?
+  super-looper check loop.json                     # validate + explain + autonomy in one card
+  super-looper run loop.json --propose ... --verify ...   # drive the deterministic skeleton
+
+Other core commands:
+  questions      print the interview question keys
+  interview      JSON-oriented version of decide
+  validate       strict spec validation (machine output)
+  explain        one-sentence plain-language preview
+  max-autonomy   compute the highest earned autonomy level
+  doctor         no-network install/core sanity check
+
+Lab / perimeter (discovery tooling, not the core idea):
+  super-looper lab repo audit ...
+  super-looper lab repo promote ...
+  super-looper lab case-study ...
+  super-looper lab runner ...
+
+Run `super-looper <command> --help` for details, or `super-looper --help` for the full list.
+"""
 
 
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
+    if getattr(args, "command", None) is None:
+        print(GOLDEN_PATH)
+        return 0
     return args.func(args)
 
 

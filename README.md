@@ -34,7 +34,7 @@ So you design the **verifier first**. If you can't write a gate that fails bad w
 | `SKILL.md` | the skill — load it into your agent harness |
 | `references/` | filled templates · state architecture · failure modes · **verified** evidence |
 | `src/super_looper/` | the **core**: verdict engine + zero-dep validator + autonomy ceiling + **the loop driver** (`runtime.py`) + CLI |
-| `src/super_looper/experimental/` | relegated perimeter — the case-study harness + remote-runner *transport*. Not the core; lazy-loaded. |
+| `src/super_looper/experimental/` | relegated perimeter — the case-study harness + remote-runner *transport* + the repo-audit engine. Not the core; lazy-loaded; reached via `super-looper lab …`. |
 | `schemas/` + `scripts/` | JSON spec schema + compatibility wrappers + the test suite |
 | `examples/` | worked loop specs + interview fixtures |
 | `evals/` | the skill's own gate — labeled scenarios + a deterministic scorer; CI runs the **actual skill** blind |
@@ -48,34 +48,37 @@ python -m pip install .
 super-looper --version
 ```
 
-**Compile interview answers:**
+**Decide whether this should be a loop:**
 ```
 super-looper questions
-super-looper interview --answers examples/unknown-gate.answers.json
-super-looper interview --answers examples/ts-client.answers.json --out draft.loop.json
+super-looper decide --answers examples/unknown-gate.answers.json
+super-looper decide --answers examples/ts-client.answers.json --out draft.loop.json
 ```
-If the human can't answer a critical question, the compiler returns `DISCOVERY_REQUIRED` and an L0 discovery plan instead of inventing a loop.
+`decide` prints a human-first verdict card by default (`DISCOVERY_REQUIRED`, `HUMAN_IN_LOOP`, `AUTONOMOUS_LOOP`, etc.). Use `interview --answers ...` or `decide --json` for the older machine-oriented JSON shape. If the human can't answer a critical question, the compiler returns `DISCOVERY_REQUIRED` and an L0 discovery plan instead of inventing a loop.
 
 **Validate & preview a spec:**
 ```
+super-looper check my-loop.json
 super-looper validate my-loop.json --strict
 super-looper render my-loop.json
 super-looper explain my-loop.json
 super-looper max-autonomy my-loop.json --json
 ```
-Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`, otherwise falls back to a built-in checker. The old `python scripts/*.py` commands remain as compatibility wrappers.
+`check` is the everyday UX: validation, plain-English behavior, and requested-vs-earned autonomy in one card. Zero deps — uses `jsonschema` if installed or via `pip install .[jsonschema]`, otherwise falls back to a built-in checker. The old `python scripts/*.py` commands remain as compatibility wrappers.
 
 **Audit a repo for automation candidates, not auto-generated loops:**
 ```
-super-looper repo audit --repo-path ../some-repo --out repo-audit
+super-looper lab repo audit --repo-path ../some-repo --out repo-audit
 ```
+Add `--verify-gates` when you want the audit to actually run discovered gate commands and record pass/fail/timeout/skipped evidence; by default, network-requiring or destructive-looking commands are skipped unless explicitly allowed.
+
 The audit writes `repo-audit.json`, `gate-inventory.json`, `repo-surfaces.json`, `automation-candidates.json`, `automation-leads.json` (alias: `loop-hypotheses.json`), `ranked-backlog.md`, and `recommendations.md`. It inventories repo-native gates from CI workflows, `pyproject.toml`, `package.json`, Makefile, tox/nox, Rust, and Go metadata, maps gates to bounded repo surfaces such as workflows, test suites, docs/examples, and code-quality paths, then classifies candidates as `plain_scheduler`, `human_in_loop`, `l2_candidate`, `discovery_required`, or `do_not_automate`. It also proposes clearly labeled **automation leads** (intake — a lead is not a loop until it passes core qualification) for plausible opportunities such as flaky CI triage, example smoke tests, integration drift, CLI contracts, release smoke checks, and performance watchpoints. Static audit never grants L3; it is discovery input for deciding whether autonomy is justified.
 
 A repo-native gate is not, by itself, a repair loop. Repair candidates stay `discovery_required` until there is a concrete input signal such as failing lint/typecheck output, a failing check log, repeated failure signature, dependency-bump failure, flaky-test history, or maintainer-provided recurring task. Otherwise the honest recommendation is to run the gate as CI/scheduled verification, not to wrap pytest or ruff in a loop.
 
 **Promote one candidate into an organized proof packet:**
 ```
-super-looper repo promote \
+super-looper lab repo promote \
   --audit repo-audit/repo-audit.json \
   --candidate surface-ci-repair-tests-yml
 ```
@@ -83,13 +86,13 @@ When `--out` is omitted, promotion writes to `case-studies/<repo-slug>/<candidat
 
 **Run a real-repo case study:**
 ```
-super-looper case-study init --repo https://github.com/chopratejas/headroom --issue https://github.com/chopratejas/headroom/issues/1233 --out case-studies/headroom-ast-compression
-super-looper case-study design case-studies/headroom-ast-compression
-super-looper case-study resolve-verifier case-studies/headroom-ast-compression --repo-path ../headroom
-super-looper case-study run case-studies/headroom-ast-compression --repo-path ../headroom --strict
-super-looper case-study simulate-verifier case-studies/headroom-ast-compression --repo-path ../headroom --template python-ast-corpus
-super-looper case-study report case-studies/headroom-ast-compression/runs/<run-id> --for maintainer
-super-looper case-study report case-studies/headroom-ast-compression/runs/<run-id> --for pr
+super-looper lab case-study init --repo https://github.com/chopratejas/headroom --issue https://github.com/chopratejas/headroom/issues/1233 --out case-studies/headroom-ast-compression
+super-looper lab case-study design case-studies/headroom-ast-compression
+super-looper lab case-study resolve-verifier case-studies/headroom-ast-compression --repo-path ../headroom
+super-looper lab case-study run case-studies/headroom-ast-compression --repo-path ../headroom --strict
+super-looper lab case-study simulate-verifier case-studies/headroom-ast-compression --repo-path ../headroom --template python-ast-corpus
+super-looper lab case-study report case-studies/headroom-ast-compression/runs/<run-id> --for maintainer
+super-looper lab case-study report case-studies/headroom-ast-compression/runs/<run-id> --for pr
 ```
 Case-study runs write `repo.json`, `loop.json`, `verifier-results.json`, `scope-check.json`, `diff.patch`, `summary.json`, and maintainer/PR markdown reports. The runner does not push or open PRs; it packages evidence so a human can decide whether to share a report or ship a patch.
 
@@ -97,9 +100,9 @@ Case-study runs write `repo.json`, `loop.json`, `verifier-results.json`, `scope-
 
 **Prepare a secure remote VM runner before installing repo dependencies:**
 ```
-super-looper runner keygen --name headroom-sandbox --out-dir .super-looper/runners
+super-looper lab runner keygen --name headroom-sandbox --out-dir .super-looper/runners
 
-super-looper runner bootstrap-plan \
+super-looper lab runner bootstrap-plan \
   --provider digitalocean \
   --ip 203.0.113.10 \
   --admin-identity-file ~/.ssh/do_bootstrap_key \
@@ -108,7 +111,7 @@ super-looper runner bootstrap-plan \
   --profile-out .super-looper/runners/headroom-sandbox.profile.json \
   --out bootstrap-plan.json
 
-super-looper runner plan \
+super-looper lab runner plan \
   --profile .super-looper/runners/headroom-sandbox.profile.json \
   --case case-studies/headroom-ast-compression \
   --repo https://github.com/chopratejas/headroom \
@@ -118,6 +121,13 @@ super-looper runner plan \
   --out remote-plan.json
 ```
 Remote plans are local JSON only: they validate a hardened SSH/container policy without executing SSH. `bootstrap-plan` supports `digitalocean`, `aws`, `gcp`, `azure`, `hetzner`, and `custom` presets; the core runner is provider-neutral SSH. Defaults are credential-spillage resistant: dedicated runner key, no agent forwarding, no password auth, strict host-key checking, no host home/credential/package-cache mounts, verifier network disabled unless explicitly allowed, artifact allowlist only, and remote workdir cleanup by default. See [`references/remote-runners.md`](references/remote-runners.md).
+
+**Before building a release wheel:** clean generated packaging artifacts so stale gitignored files cannot leak into the wheel:
+```
+python scripts/clean_release_artifacts.py --dry-run
+python scripts/clean_release_artifacts.py --yes
+python -m pip install .
+```
 
 **Gate the skill itself** — run the *actual* skill blind over every scenario and score the live output (the real gate; CI runs this on push-to-main + nightly + on demand):
 ```

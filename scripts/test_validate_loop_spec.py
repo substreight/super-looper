@@ -488,6 +488,34 @@ def test_untrusted_suite_example_is_clean():
     assert errors == [], errors
 
 
+# ---- the human-first check card (super-looper check) ----
+
+def test_render_check_passes_clean_spec_and_states_max_autonomy():
+    errors, warnings = v.validate(GOOD)
+    card = v.render_check(GOOD, errors, warnings)
+    assert card.startswith("CHECK PASSED")
+    assert "max safe:   L3" in card
+    assert "Plain-English behavior:" in card
+
+
+def test_render_check_flags_requested_autonomy_above_earned():
+    spec = _spec()
+    # Demote the gate to independent_model: earned drops to L2, but request stays L3.
+    spec["verifier"] = dict(spec["verifier"], rung="independent_model", end_to_end=False)
+    card = v.render_check(spec, *v.validate(spec))
+    assert "requested:  L3 (TOO HIGH)" in card
+    assert "max safe:   L2" in card
+    assert "to earn more autonomy, add:" in card
+
+
+def test_render_check_never_raises_on_malformed_spec():
+    # A non-dict verifier used to crash render(); the card must degrade gracefully.
+    spec = _spec(verifier="broken")
+    card = v.render_check(spec, *v.validate(spec))
+    assert "CHECK FAILED" in card
+    assert "Errors (fix before running):" in card
+
+
 def _run_all():
     fns = sorted((n, fn) for n, fn in globals().items()
                  if n.startswith("test_") and callable(fn))

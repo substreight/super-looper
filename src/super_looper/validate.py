@@ -690,6 +690,63 @@ def render_plain(spec):
     return "; ".join(parts) + f".  [max safe autonomy: {earned}]"
 
 
+def render_check(spec, errors=None, warnings=None):
+    """Human-first verdict card for `super-looper check`.
+
+    Combines validation status, the plain-English behavior, and the autonomy
+    verdict (requested vs max earned, and what's missing to go higher) into one
+    glanceable block. Pure: callers pass in the validate() result so this never
+    re-validates or raises on a malformed spec.
+    """
+    spec = _d(spec)
+    errors = list(errors or [])
+    warnings = list(warnings or [])
+    lines = []
+
+    status = "CHECK FAILED" if errors else ("CHECK PASSED (with warnings)" if warnings else "CHECK PASSED")
+    lines.append(status)
+    name = spec.get("name")
+    if name:
+        lines.append("")
+        lines.append("Loop:")
+        lines.append(f"  {name}")
+
+    lines.append("")
+    lines.append("Plain-English behavior:")
+    try:
+        lines.append(f"  {render_plain(spec)}")
+    except Exception as exc:  # malformed spec must still produce a card, not a traceback
+        lines.append(f"  (could not summarize malformed spec: {exc})")
+
+    requested = _d(spec.get("autonomy")).get("requested")
+    earned, missing = max_autonomy(spec)
+    lines.append("")
+    lines.append("Autonomy:")
+    if requested:
+        ok = "ok" if requested <= earned else "TOO HIGH"
+        lines.append(f"  requested:  {requested} ({ok})")
+    lines.append(f"  max safe:   {earned}")
+    if missing:
+        lines.append("  to earn more autonomy, add:")
+        for item in missing:
+            lines.append(f"    - {item}")
+    else:
+        lines.append("  nothing blocks the next level")
+
+    if warnings:
+        lines.append("")
+        lines.append("Warnings:")
+        for w in warnings:
+            lines.append(f"  ! {w}")
+    if errors:
+        lines.append("")
+        lines.append("Errors (fix before running):")
+        for e in errors:
+            lines.append(f"  x {e}")
+
+    return "\n".join(lines)
+
+
 # ---------- CLI ----------
 
 def _main(argv):

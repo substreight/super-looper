@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0 - 2026-06-22
+Smaller core, clearer UX, honest gates. The first job is still to say no; now the product makes that obvious. Every item shipped with tests.
+
+- **UX - the `check` command:** `super-looper check <spec>` replaces the validate/explain/max-autonomy juggle with one human-first verdict card (status, plain-English behavior, requested-vs-earned autonomy, what's missing to go higher). `--json` emits the structured result for tooling. Stays on the clean hot path (loads no perimeter).
+- **UX - bare invocation:** `super-looper` with no args now prints the golden path (decide -> check -> run) and exits 0, instead of an argparse error.
+- **UX - `decide`:** `super-looper decide` is the human-first version of the interview compiler. It prints a verdict card by default (`DISCOVERY REQUIRED`, `HUMAN IN LOOP`, `AUTONOMOUS LOOP`, etc.) and keeps `--json` for tooling.
+- **UX - `doctor`:** `super-looper doctor` runs a no-network install/core sanity check and reports version, Python, validator mode, example-spec status, and whether any perimeter modules are loaded.
+- **CLI hierarchy - `lab`:** repo audit, case-study, and remote-runner tooling can now be reached through `super-looper lab ...`, making the perimeter explicit while preserving old top-level commands as compatibility aliases.
+- **Repo audit - verified gates:** `super-looper lab repo audit --verify-gates` now runs discovered gate commands and records `passed`/`failed`/`timeout`/`skipped` evidence per gate, with conservative defaults that skip network-requiring or destructive-looking commands unless explicitly allowed.
+- **Architecture - perimeter fully relegated:** `repo_audit.py` joined the case-study harness and remote-runner transport under `super_looper/experimental/`. The expired top-level back-compat shims (`super_looper.repo_audit`, `super_looper.case_study`, `super_looper.remote_runner`) are REMOVED in 0.7.0 (breaking): import from `super_looper.experimental.*` instead. Bare `import super_looper` still loads zero perimeter.
+- **Build - sane test discovery:** added `[tool.pytest.ini_options]` so bare `python -m pytest` no longer chokes on generated case-study run artifacts (it now collects the real `scripts/` suite cleanly).
+- **Release hygiene:** added `scripts/clean_release_artifacts.py` and CI coverage so release/package smoke builds start from a clean generated-artifact tree. This prevents stale `build/lib` files from reintroducing deleted modules into a wheel.
+- **Self-enforcement - eval no-regression gate:** `score_eval.py --baseline evals/baseline.json` fails the run if any previously-passing scenario regresses, even when overall accuracy clears `--min`. `baseline.json` now records `passing_ids`. CI wires the deterministic self-test with `--baseline` and raises the live skill-gate floor to 0.9.
+
+- **Breaking:** the three expired top-level shims are deleted (see above). Update imports to `super_looper.experimental.*`.
+
+Deferred to 0.8.0: the optional `super-looper-lab` package split (lazy imports + the `lab` namespace already keep the hot path clean; splitting the wheel is a larger packaging change).
+
 ## 0.6.2 — 2026-06-22
 Repo-audit gate hygiene + promotion supplement — driven by dogfooding the audit on 7 fresh public repos (Python/TS/Rust/Go, Makefiles, a monorepo, multi-CI). No crashes anywhere; the routing stayed conservative; the *gate inventory* was the rough edge.
 

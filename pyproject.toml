@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "super-looper"
-version = "0.6.2"
+version = "0.7.0"
 description = "Conservative agentic loop design, validation, and interview tooling."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -46,3 +46,18 @@ where = ["src"]
 [tool.setuptools.package-data]
 super_looper = ["resources/*.json"]
 "super_looper.resources" = ["*.json"]
+
+[tool.pytest.ini_options]
+# The test suite lives in scripts/. Generated case-study run artifacts (under
+# case-studies/**/runs/) contain duplicate-basename test files that break bare
+# `python -m pytest` collection, so restrict discovery to the real suite.
+testpaths = ["scripts"]
+norecursedirs = [
+  ".git",
+  ".super-looper",
+  "build",
+  "dist",
+  "case-studies",
+  "node_modules",
+  "*.egg-info",
+]

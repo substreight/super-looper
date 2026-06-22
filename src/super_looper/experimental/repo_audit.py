@@ -11,12 +11,14 @@ import configparser
 import json
 import os
 import re
+import subprocess
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .design import build_spec
-from .validate import max_autonomy
+from ..design import build_spec
+from ..validate import max_autonomy
 
 
 class RepoAuditError(RuntimeError):
@@ -544,6 +546,82 @@ def discover_gates(repo_path: str, files: Optional[Sequence[str]] = None, max_fi
         }
         for idx, gate in enumerate(sorted_gates, start=1)
     ]
+
+
+def verify_gate_inventory(
+    repo_path: str,
+    gates: Sequence[Dict[str, Any]],
+    *,
+    timeout_seconds: int = 60,
+    allow_network: bool = False,
+    allow_destructive: bool = False,
+) -> List[Dict[str, Any]]:
+    """Run discovered gates and annotate each with verification evidence.
+
+    Static discovery says "this looks like a gate"; verification says whether it
+    actually passes on this checkout. Network-requiring and destructive commands
+    are skipped unless explicitly allowed.
+    """
+    repo = Path(repo_path).resolve()
+    verified: List[Dict[str, Any]] = []
+    for gate in gates:
+        item = dict(gate)
+        command = str(item.get("command") or "")
+        verification: Dict[str, Any] = {
+            "status": "not_run",
+            "timeout_seconds": timeout_seconds,
+        }
+        if item.get("requires_network") and not allow_network:
+            verification["status"] = "skipped_requires_network"
+        elif item.get("destructive") and not allow_destructive:
+            verification["status"] = "skipped_destructive"
+        else:
+            started = time.monotonic()
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=str(repo),
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                )
+                duration = round(time.monotonic() - started, 3)
+                verification.update({
+                    "status": "passed" if completed.returncode == 0 else "failed",
+                    "exit_code": completed.returncode,
+                    "duration_seconds": duration,
+                })
+                if completed.stdout:
+                    verification["stdout_tail"] = completed.stdout[-2000:]
+                if completed.stderr:
+                    verification["stderr_tail"] = completed.stderr[-2000:]
+            except subprocess.TimeoutExpired as exc:
+                verification.update({
+                    "status": "timeout",
+                    "duration_seconds": round(time.monotonic() - started, 3),
+                })
+                if exc.stdout:
+                    verification["stdout_tail"] = str(exc.stdout)[-2000:]
+                if exc.stderr:
+                    verification["stderr_tail"] = str(exc.stderr)[-2000:]
+            except OSError as exc:
+                verification.update({
+                    "status": "error",
+                    "error": str(exc),
+                    "duration_seconds": round(time.monotonic() - started, 3),
+                })
+        item["verification"] = verification
+        verified.append(item)
+    return verified
+
+
+def _gate_verification_counts(gates: Sequence[Dict[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for gate in gates:
+        status = ((gate.get("verification") or {}).get("status")) or "not_run"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 def _gate_ids(gates: Sequence[Dict[str, Any]], *, categories: Sequence[str] = (), strengths: Sequence[str] = (), limit: int = 4) -> List[str]:
@@ -1613,13 +1691,30 @@ def render_recommendations(audit: Dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def audit_repo(repo_path: str, out_dir: Optional[str] = None, max_files: int = 50_000) -> Dict[str, Any]:
+def audit_repo(
+    repo_path: str,
+    out_dir: Optional[str] = None,
+    max_files: int = 50_000,
+    *,
+    verify_gates: bool = False,
+    gate_timeout_seconds: int = 60,
+    allow_network_gates: bool = False,
+    allow_destructive_gates: bool = False,
+) -> Dict[str, Any]:
     """Audit a repository and optionally write reviewable artifacts."""
     repo = Path(repo_path).resolve()
     if not repo.is_dir():
         raise RepoAuditError(f"repo path does not exist: {repo}")
     files = _walk_files(repo, max_files)
     gates = discover_gates(str(repo), files=files, max_files=max_files)
+    if verify_gates:
+        gates = verify_gate_inventory(
+            str(repo),
+            gates,
+            timeout_seconds=gate_timeout_seconds,
+            allow_network=allow_network_gates,
+            allow_destructive=allow_destructive_gates,
+        )
     surfaces = infer_surfaces(str(repo), gates, files)
     candidates = build_candidates(str(repo), gates, files, surfaces=surfaces)
     traits = _repo_traits(repo, files, gates)
@@ -1636,6 +1731,7 @@ def audit_repo(repo_path: str, out_dir: Optional[str] = None, max_files: int = 5
             "has_tests": traits["has_tests"],
             "has_docs": traits["has_docs"],
             "gate_counts": traits["gate_counts"],
+            "gate_verification_counts": _gate_verification_counts(gates),
             "surface_counts": {
                 key: sum(1 for surface in surfaces if surface["kind"] == key)
                 for key in sorted({surface["kind"] for surface in surfaces})
