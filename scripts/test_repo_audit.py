@@ -15,6 +15,7 @@ from super_looper.cli import main as cli_main  # noqa: E402
 from super_looper.experimental.repo_audit import (  # noqa: E402
     audit_repo,
     default_promotion_out_dir,
+    render_ranked_backlog,
     verify_gate_inventory,
     _add_gate,
     _classify_command,
@@ -240,11 +241,15 @@ def test_verify_gate_inventory_records_pass_fail_and_skips_unsafe():
         ]
         verified = verify_gate_inventory(repo, gates, timeout_seconds=10)
     by_id = {gate["id"]: gate["verification"] for gate in verified}
+    strengths = {gate["id"]: gate["confirmed_strength"] for gate in verified}
     assert by_id["gate-pass"]["status"] == "passed"
     assert by_id["gate-pass"]["exit_code"] == 0
+    assert strengths["gate-pass"] == "weak"
     assert by_id["gate-fail"]["status"] == "failed"
     assert by_id["gate-fail"]["exit_code"] == 7
+    assert strengths["gate-fail"] == "failed"
     assert by_id["gate-network"]["status"] == "skipped_requires_network"
+    assert strengths["gate-network"] == "unverified"
 
 
 def test_repo_audit_verify_gates_confirms_discovered_pytest_gate():
@@ -258,6 +263,31 @@ def test_repo_audit_verify_gates_confirms_discovered_pytest_gate():
     assert counts.get("passed", 0) >= 1
     pytest_gate = next(g for g in audit["gate_inventory"] if g["command"] == "python -m pytest")
     assert pytest_gate["verification"]["status"] == "passed"
+
+
+def test_repo_audit_verify_gates_downgrades_candidates_when_primary_gate_fails():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        _write(repo, "tests/test_pkg.py", "def test_pkg():\n    assert False\n")
+        _write(repo, "pyproject.toml", "[tool.pytest.ini_options]\n")
+        static = audit_repo(repo)
+        verified = audit_repo(repo, verify_gates=True, gate_timeout_seconds=30)
+
+    static_scheduler = _candidate(static, "repo-native-verification-scheduler")
+    verified_scheduler = _candidate(verified, "repo-native-verification-scheduler")
+    pytest_gate = next(g for g in verified["gate_inventory"] if g["command"] == "python -m pytest")
+
+    assert pytest_gate["verification"]["status"] == "failed"
+    assert pytest_gate["confirmed_strength"] == "failed"
+    assert verified_scheduler["confirmed_gate_strength"] == "failed"
+    assert verified_scheduler["score"]["total"] < static_scheduler["score"]["total"]
+    assert verified_scheduler["static_score"] == static_scheduler["score"]
+    assert any("must pass" in item for item in verified_scheduler["missing_evidence"])
+    backlog = render_ranked_backlog(verified)
+    assert "Static Gate" in backlog
+    assert "Confirmed Gate" in backlog
+    assert "`failed`" in backlog
 
 
 def test_repo_promote_writes_clean_case_study_taxonomy_for_static_candidate():

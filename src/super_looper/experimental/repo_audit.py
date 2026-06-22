@@ -612,6 +612,7 @@ def verify_gate_inventory(
                     "duration_seconds": round(time.monotonic() - started, 3),
                 })
         item["verification"] = verification
+        item["confirmed_strength"] = _confirmed_gate_strength(item)
         verified.append(item)
     return verified
 
@@ -622,6 +623,95 @@ def _gate_verification_counts(gates: Sequence[Dict[str, Any]]) -> Dict[str, int]
         status = ((gate.get("verification") or {}).get("status")) or "not_run"
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _confirmed_gate_strength(gate: Dict[str, Any]) -> str:
+    """Strength after optional live verification.
+
+    Static discovery says a command *looks* strong/medium/weak. Verification says
+    whether it actually passed on this checkout. If no verification was attempted,
+    keep the distinction explicit as ``static_only`` rather than pretending it was
+    confirmed.
+    """
+    verification = gate.get("verification")
+    if not isinstance(verification, dict):
+        return "static_only"
+    status = verification.get("status")
+    if status == "passed":
+        return str(gate.get("strength") or "weak")
+    if status in {"failed", "timeout", "error"}:
+        return "failed"
+    if status and status.startswith("skipped"):
+        return "unverified"
+    return "unverified"
+
+
+def _score_with_gate(score: Dict[str, int], *, gate_value: int, extra_risk: int = 0) -> Dict[str, int]:
+    adjusted = dict(score)
+    adjusted["gate"] = gate_value
+    adjusted["risk_penalty"] = adjusted.get("risk_penalty", 0) + extra_risk
+    adjusted["total"] = max(
+        0,
+        min(
+            100,
+            adjusted.get("leverage", 0)
+            + adjusted.get("gate", 0)
+            + adjusted.get("effort", 0)
+            - adjusted.get("risk_penalty", 0),
+        ),
+    )
+    return adjusted
+
+
+def _apply_gate_verification_to_candidates(
+    candidates: Sequence[Dict[str, Any]],
+    gates: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Annotate/downgrade candidates with verified-gate evidence when available."""
+    gates_by_id = {gate["id"]: gate for gate in gates}
+    any_verified = any(isinstance(gate.get("verification"), dict) for gate in gates)
+    if not any_verified:
+        return list(candidates)
+
+    out: List[Dict[str, Any]] = []
+    rank = {"strong": 3, "medium": 2, "weak": 1, "none": 0}
+    for candidate in candidates:
+        item = dict(candidate)
+        primary = [gates_by_id[gate_id] for gate_id in item.get("primary_gates", []) if gate_id in gates_by_id]
+        if not primary:
+            item["confirmed_gate_strength"] = "none"
+            out.append(item)
+            continue
+
+        strengths = [_confirmed_gate_strength(gate) for gate in primary]
+        item["confirmed_gate_strength"] = (
+            "failed" if "failed" in strengths
+            else "unverified" if "unverified" in strengths
+            else max(strengths, key=lambda value: rank.get(value, -1))
+        )
+        item["static_score"] = dict(item["score"])
+
+        if item["confirmed_gate_strength"] == "failed":
+            item["score"] = _score_with_gate(item["score"], gate_value=0, extra_risk=18)
+            item.setdefault("missing_evidence", [])
+            item["missing_evidence"] = [
+                *item["missing_evidence"],
+                "primary verifier command must pass before this candidate can be trusted",
+            ]
+            item.setdefault("why", [])
+            item["why"] = [
+                *item["why"],
+                "Verified-gate evidence downgraded this candidate: at least one primary gate failed, errored, or timed out.",
+            ]
+        elif item["confirmed_gate_strength"] == "unverified":
+            item["score"] = _score_with_gate(item["score"], gate_value=min(item["score"].get("gate", 0), 8), extra_risk=6)
+            item.setdefault("missing_evidence", [])
+            item["missing_evidence"] = [
+                *item["missing_evidence"],
+                "primary verifier command was not confirmed in this audit run",
+            ]
+        out.append(item)
+    return sorted(out, key=lambda row: (-row["score"]["total"], row["id"]))
 
 
 def _gate_ids(gates: Sequence[Dict[str, Any]], *, categories: Sequence[str] = (), strengths: Sequence[str] = (), limit: int = 4) -> List[str]:
@@ -1582,13 +1672,14 @@ def render_ranked_backlog(audit: Dict[str, Any]) -> str:
         "",
         "Static audit output is a conservative triage list. It does not grant unattended autonomy.",
         "",
-        "| Rank | Candidate | Path | Max Agent Autonomy | Gate | Score |",
-        "|---:|---|---|---|---|---:|",
+        "| Rank | Candidate | Path | Max Agent Autonomy | Static Gate | Confirmed Gate | Score |",
+        "|---:|---|---|---|---|---|---:|",
     ]
     for idx, candidate in enumerate(audit["automation_candidates"], start=1):
+        confirmed = candidate.get("confirmed_gate_strength", "not run")
         lines.append(
             f"| {idx} | {candidate['title']} | `{candidate['recommended_path']}` | "
-            f"`{candidate['max_agent_autonomy']}` | `{candidate['gate_strength']}` | {candidate['score']['total']} |"
+            f"`{candidate['max_agent_autonomy']}` | `{candidate['gate_strength']}` | `{confirmed}` | {candidate['score']['total']} |"
         )
     lines.extend(["", "## Details", ""])
     for candidate in audit["automation_candidates"]:
@@ -1598,6 +1689,7 @@ def render_ranked_backlog(audit: Dict[str, Any]) -> str:
             f"- Decision: `{candidate['recommended_path']}`",
             f"- Max agent autonomy: `{candidate['max_agent_autonomy']}`",
             f"- Gate strength: `{candidate['gate_strength']}`",
+            f"- Confirmed gate strength: `{candidate.get('confirmed_gate_strength', 'not run')}`",
             f"- Evidence level: `{candidate['evidence_level']}`",
             f"- Surface: {candidate.get('surface_title', 'whole repo')}",
             f"- Primary gates: {', '.join('`' + gate + '`' for gate in candidate['primary_gates']) or 'none'}",
@@ -1717,6 +1809,7 @@ def audit_repo(
         )
     surfaces = infer_surfaces(str(repo), gates, files)
     candidates = build_candidates(str(repo), gates, files, surfaces=surfaces)
+    candidates = _apply_gate_verification_to_candidates(candidates, gates)
     traits = _repo_traits(repo, files, gates)
     audit = {
         "schema_version": 1,

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased - 0.7.1
+Follow-up polish after the 0.7.0 release.
+
+- **Repo audit - confirmed gate strength:** verified gate runs now annotate each gate with `confirmed_strength` (`strong`/`medium`/`weak` when passed, `failed` when failed/timed out/errored, `unverified` when skipped). Candidates that rely on failed or unverified primary gates are downgraded and keep their original `static_score` for review.
+- **Docs - first five minutes:** added `docs/first-five-minutes.md` and linked it from the README quickstart.
+
 ## 0.7.0 - 2026-06-22
 Smaller core, clearer UX, honest gates. The first job is still to say no; now the product makes that obvious. Every item shipped with tests.
 
