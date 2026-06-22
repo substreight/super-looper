@@ -23,7 +23,6 @@ DEFAULT_TARGETS = (
     "src/super_looper.egg-info",
     ".pkg-test",
     ".pkg-cache",
-    ".pytest_cache",
 )
 
 
