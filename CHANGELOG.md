@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2 — 2026-06-22
+Repo-audit gate hygiene + promotion supplement — driven by dogfooding the audit on 7 fresh public repos (Python/TS/Rust/Go, Makefiles, a monorepo, multi-CI). No crashes anywhere; the routing stayed conservative; the *gate inventory* was the rough edge.
+
+- **Gate hygiene:** drop non-runnable commands (`${{ }}` CI interpolation, backticks, `$(...)`); drop non-verifier tasks (`prepare-release` / `gh-release-notes` / `update-plugin-list` / `bump-version` — these ship releases, they aren't gates); dedupe on a canonical key across sources and normalize `npm|yarn|pnpm run X` → `… X` (so `make test` from three workflows collapses to one, and `yarn run test` merges with `yarn test`).
+- **Variant consolidation (#4):** npm/yarn/pnpm script `:`-variants within a category collapse to one representative (the base), with the dropped variants noted in the rationale. On prettier: **42 → 7** gates.
+- **Fuzz isn't a strong gate (#5):** `go test -fuzz=… -fuzztime=…` is time-boxed and nondeterministic, so it's tagged `test|weak`, not `test|strong`.
+- **Promotion `--answers` supplement:** `super-looper repo promote --answers human.json` merges human answers over the lead-derived ones, so a human can fill the gaps a static scan can't know and a borderline lead can qualify into a real loop (still gated by the verdict engine).
+
 ## 0.6.1 — 2026-06-22
 The live skill gate goes on — plus the fixes and skill sharpening it immediately surfaced.
 

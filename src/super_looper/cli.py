@@ -425,6 +425,7 @@ def cmd_repo_promote(args):
             name=args.name,
             max_runtime_seconds=args.max_runtime_seconds,
             out_root=args.out_root,
+            answers_path=args.answers,
         )
     except RepoAuditError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -500,6 +501,7 @@ def build_parser():
     repo_promote.add_argument("--issue", help="optional issue URL or identifier")
     repo_promote.add_argument("--name", help="case-study manifest name")
     repo_promote.add_argument("--max-runtime-seconds", type=int, default=1800, help="runtime budget for verifier runs")
+    repo_promote.add_argument("--answers", help="JSON of human answers to supplement the lead (fills gaps a static scan can't know, so a borderline lead can qualify)")
     repo_promote.set_defaults(func=cmd_repo_promote)
 
     case = sub.add_parser("case-study", help="create, run, and report real-repo loop case studies")

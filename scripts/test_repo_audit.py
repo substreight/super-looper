@@ -17,6 +17,8 @@ from super_looper.repo_audit import (  # noqa: E402
     default_promotion_out_dir,
     _add_gate,
     _classify_command,
+    _consolidate_gates,
+    _make_gate,
 )
 
 
@@ -403,6 +405,75 @@ def test_yarn_run_test_dedupes_and_is_test_strength():
     _add_gate(gates, "yarn run test", "package.json", "y")
     assert len(gates) == 1, [g.command for g in gates]
     assert gates[0].category == "test" and gates[0].strength == "strong", gates[0]
+
+
+# ---- #5: a fuzz run is not a clean deterministic gate ----
+
+def test_fuzz_run_is_not_a_strong_gate():
+    g = _make_gate("go test ./src/algo/ -fuzz=FuzzX -fuzztime=5s", ".github/workflows/linux.yml", "x")
+    assert g.category == "test" and g.strength == "weak", g
+    plain = _make_gate("go test ./...", "go.mod", "x")
+    assert plain.strength == "strong", plain
+
+
+# ---- #4: consolidate npm/yarn/pnpm script `:`-variants ----
+
+def test_consolidate_collapses_script_variants():
+    gates = [
+        _make_gate("yarn test", ".github/workflows/ci.yml", "x"),
+        _make_gate("yarn test:production", "package.json", "x"),
+        _make_gate("yarn test:production:browser:chrome", "package.json", "x"),
+        _make_gate("cargo test", "Cargo.toml", "x"),  # non-script -> untouched
+    ]
+    out = _consolidate_gates(gates)
+    cmds = [g.command for g in out]
+    assert "yarn test" in cmds, cmds                      # the base survives
+    assert "yarn test:production" not in cmds, cmds        # variants collapsed
+    assert "cargo test" in cmds, cmds                      # non-script kept
+    yarn_test = [g for g in out if g.command == "yarn test"][0]
+    assert "variant" in yarn_test.rationale.lower(), yarn_test.rationale  # notes the dropped variants
+
+
+# ---- promotion --answers supplement: a human fills the gaps so a lead qualifies ----
+
+def test_repo_promote_with_answers_supplement_qualifies_to_loop():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        audit_dir = os.path.join(root, "audit")
+        promote_dir = os.path.join(root, "promotions", "supplemented")
+        os.makedirs(repo)
+        _write_promotable_repo(repo)
+        assert cli_main(["repo", "audit", "--repo-path", repo, "--out", audit_dir]) == 0
+        with open(os.path.join(audit_dir, "repo-audit.json"), encoding="utf-8") as f:
+            audit = json.load(f)
+        candidate = next(item for item in audit["automation_candidates"] if item.get("hypothesis"))
+
+        human = os.path.join(root, "human.json")
+        with open(human, "w", encoding="utf-8") as f:
+            json.dump({
+                "recurs": True,
+                "wrong_result_signal": "pytest exits nonzero",
+                "gate_check": "pytest exits 0",
+                "finished_state": "the suite passes",
+                "evidence": "pytest exits 0",
+                "may_touch": ["src/", "tests/"],
+                "must_not_touch": ["secrets/"],
+                "budget": {"max_runtime_seconds": 600},
+                "gate_rung": "tool",
+            }, f)
+
+        rc = cli_main([
+            "repo", "promote",
+            "--audit", os.path.join(audit_dir, "repo-audit.json"),
+            "--candidate", candidate["id"],
+            "--out", promote_dir,
+            "--answers", human,
+        ])
+        assert rc == 0
+        assert os.path.exists(os.path.join(promote_dir, "design", "loop.json")), "human answers should qualify the lead"
+        with open(os.path.join(promote_dir, "inputs", "promotion.json"), encoding="utf-8") as f:
+            promotion = json.load(f)
+        assert promotion["design_verdict"] == "AUTONOMOUS_LOOP", promotion
 
 
 def _run_all():

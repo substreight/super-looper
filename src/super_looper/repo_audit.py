@@ -11,7 +11,7 @@ import configparser
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -195,6 +195,8 @@ def _classify_command(command: str) -> str:
 
 def _gate_strength(category: str, command: str, source: str) -> str:
     lower = command.lower()
+    if category == "test" and ("-fuzz" in lower or "fuzztime" in lower):
+        return "weak"  # a fuzz run is time-boxed and nondeterministic, not a clean pass/fail gate
     if category == "test":
         return "strong"
     if category in {"typecheck", "lint", "security"}:
@@ -294,6 +296,40 @@ def _add_gate(gates: List[Gate], command: str, source: str, rationale: str) -> N
     if any(_gate_dedup_key(g.command) == key for g in gates):
         return
     gates.append(_make_gate(command, source, rationale))
+
+
+def _script_family(command: str) -> Optional[Tuple[str, str]]:
+    """For a `<mgr> <script>` command, return (manager, script-family before the first ':')."""
+    match = re.match(r"^(npm|pnpm|yarn|bun)\s+(?:run\s+)?(\S+)", command.lower())
+    if not match:
+        return None
+    return match.group(1), match.group(2).split(":", 1)[0]
+
+
+def _consolidate_gates(gates: List[Gate]) -> List[Gate]:
+    """Collapse npm/yarn/pnpm script `:`-variants within a category to one representative.
+
+    `yarn test`, `yarn test:production`, `yarn test:production:browser` -> one `yarn test`
+    (the shortest = the base), with the dropped variants noted in the rationale. Non-script
+    gates (make/tox/cargo/python/...) pass through untouched.
+    """
+    singles: List[Gate] = []
+    groups: Dict[Tuple[str, str, str], List[Gate]] = {}
+    for gate in gates:
+        family = _script_family(gate.command)
+        if family is None:
+            singles.append(gate)
+        else:
+            groups.setdefault((gate.category, family[0], family[1]), []).append(gate)
+    out = list(singles)
+    for group in groups.values():
+        rep = min(group, key=lambda g: len(g.command))
+        if len(group) > 1:
+            others = sorted(g.command for g in group if g.command != rep.command)
+            shown = ", ".join(others[:4]) + ("..." if len(others) > 4 else "")
+            rep = replace(rep, rationale=f"{rep.rationale} (+{len(group) - 1} script variants: {shown})")
+        out.append(rep)
+    return out
 
 
 def _node_manager(files: Sequence[str]) -> str:
@@ -485,7 +521,7 @@ def discover_gates(repo_path: str, files: Optional[Sequence[str]] = None, max_fi
     _discover_ci_gates(repo, files, gates)
     _discover_language_gates(repo, files, gates)
     sorted_gates = sorted(
-        gates,
+        _consolidate_gates(gates),
         key=lambda g: (
             {"strong": 0, "medium": 1, "weak": 2}.get(g.strength, 9),
             g.requires_network,
@@ -1985,6 +2021,7 @@ def promote_candidate(
     name: Optional[str] = None,
     max_runtime_seconds: int = 1800,
     out_root: str = "case-studies",
+    answers_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Promote an audit candidate into a clean case-study proof packet."""
     source = Path(audit_path).resolve()
@@ -2025,6 +2062,11 @@ def promote_candidate(
     }
 
     answers = _answers_for_candidate(candidate, gates, max_runtime_seconds)
+    if answers_path:
+        with open(answers_path, encoding="utf-8") as _f:
+            supplement = json.load(_f)
+        if isinstance(supplement, dict):
+            answers = {**answers, **supplement}  # human answers fill the gaps a static lead can't know
     spec, report = build_spec(answers)
     design_report = {
         "manifest": "case-study.json",
