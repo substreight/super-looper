@@ -17,7 +17,7 @@ The live skill gate goes on — plus the fixes and skill sharpening it immediate
 - **Eval calibration:** corrected over-precise answer keys the live run exposed — `DISCOVERY_REQUIRED` accepted for an unattended/no-gate task, the `fix-tests` scenario rewritten as a genuinely clean loop, and `REJECT_DESIGN` accepted for a subjective one-off.
 
 ## 0.6.0 — 2026-06-22
-**Back to center:** the loop as a deterministic primitive, an honest validator, and a relegated perimeter. See `SCOPE.md` for the north star — *determinism → code, judgment → the model, infrastructure → the environment.*
+**Back to center:** the loop as a deterministic primitive, an honest validator, and a relegated perimeter. The north star — *determinism → code, judgment → the model, infrastructure → the environment.*
 
 **Core — make the loop first-class:**
 - **Loop driver (`super_looper.runtime.run_loop`):** a tiny deterministic executor that runs a validated loop's skeleton *in code* — iteration/budget/no-progress caps, the keep/revert ratchet, state checkpointing — with the model's `propose` step, the gate, the workspace, and the clock all **injected**. `super-looper run <spec> --propose <cmd> --verify <cmd>` drives it. No LLM/network/subprocess of its own; fail-closed (only an explicit pass keeps).

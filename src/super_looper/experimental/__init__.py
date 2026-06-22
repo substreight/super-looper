@@ -1,6 +1,6 @@
 """Experimental Super Looper subsystems — NOT the core.
 
-These are perimeter pieces relegated here on purpose (see ``SCOPE.md``): the
+These are perimeter pieces relegated here on purpose: the
 case-study repo/diff/mini-CI harness and the remote-runner *transport*. The core
 of Super Looper is the loop primitive (definition, the deterministic driver,
 boundaries, state) plus the verdict/autonomy judgment — none of which lives here.

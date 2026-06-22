@@ -1,5 +1,5 @@
 """Back-compat shim. The case-study harness now lives in
-``super_looper.experimental.case_study`` (relegated — see ``SCOPE.md``).
+``super_looper.experimental.case_study`` (a relegated experimental subsystem).
 
 Importing ``super_looper.case_study`` keeps working for one release; prefer the
 experimental path. New code should use ``super_looper.runtime`` for the loop driver.

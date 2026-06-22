@@ -11,7 +11,7 @@ from .validate import max_autonomy, render, render_plain, validate
 
 # Perimeter subsystems -- the case-study harness, the remote-runner transport, and the
 # repo-audit adapter -- are imported LAZILY inside their own handlers so the minimal path
-# (validate / run / explain / max-autonomy / interview) never loads them. See SCOPE.md.
+# (validate / run / explain / max-autonomy / interview) never loads them.
 
 
 def _load_json(path):

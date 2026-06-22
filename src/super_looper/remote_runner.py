@@ -1,5 +1,5 @@
 """Back-compat shim. The remote-runner *transport* now lives in
-``super_looper.experimental.remote_runner`` (relegated — see ``SCOPE.md``).
+``super_looper.experimental.remote_runner`` (a relegated experimental subsystem).
 
 Super Looper does not own remote execution. Declare ``execution.policy`` in the
 loop spec (the validator checks it) and run it on your own isolated infrastructure.
