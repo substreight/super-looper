@@ -251,6 +251,20 @@ def _artifact_allowlist() -> List[str]:
     ]
 
 
+def _not_enforced_controls(isolation: str) -> List[str]:
+    """Controls super-looper does NOT enforce in the emitted plan -- the caller's own
+    infrastructure must. Being honest about these is the point (see REVIEW #12/#13)."""
+    controls = [
+        "advisory: the artifact allowlist is not applied by this plan -- it copies all of "
+        "/out back, so keep secrets out of /out (or filter before download)",
+    ]
+    if isolation != "container":
+        controls.insert(0,
+            "not enforced: network, filesystem, and capability isolation in remote-vm mode -- "
+            "your own infrastructure must enforce them (or use isolation=container)")
+    return controls
+
+
 def create_runner_key(
     *,
     name: str,
@@ -616,7 +630,7 @@ def build_remote_runner_plan(
 
     return {
         "schema_version": 1,
-        "mode": "remote-vm-secure-plan",
+        "mode": "remote-runner-plan",
         "remote": {
             "url": f"ssh://{target.ssh_destination}:{target.port}",
             "user": target.user,
@@ -642,15 +656,16 @@ def build_remote_runner_plan(
                 "StrictHostKeyChecking=yes unless explicitly weakened",
                 "no host home, ssh, cloud, kube, browser, or package-cache mounts",
                 "remote workdir is unique and mode 0700",
-                "verifier phase runs with network disabled by default",
-                "only artifact allowlist is copied back",
                 "remote workdir is deleted by default",
             ],
             "ssh_options": options,
+            "isolation_enforced": isolation == "container",
             "network": {
                 "setup": "enabled" if allow_network_setup else "disabled",
                 "verifier_run": "enabled" if allow_network_run else "disabled",
+                "enforced": isolation == "container" and not allow_network_run,
             },
+            "not_enforced_here": _not_enforced_controls(isolation),
             "artifact_allowlist": _artifact_allowlist(),
             "blocked_host_paths": [
                 "~/.ssh",

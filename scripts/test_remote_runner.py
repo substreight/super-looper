@@ -219,6 +219,46 @@ def test_create_runner_key_writes_dedicated_keypair_when_ssh_keygen_exists():
         assert result["public_key"].startswith("ssh-ed25519 ")
 
 
+def test_plan_does_not_assert_unenforced_controls():
+    # #12 / #13: the plan must not CLAIM controls it doesn't enforce. In remote-vm mode
+    # super-looper enforces no sandbox and no artifact filter -- it must say so.
+    with tempfile.TemporaryDirectory() as root:
+        key = os.path.join(root, "runner_key")
+        open(key, "w", encoding="utf-8").close()
+        plan = build_remote_runner_plan(
+            remote="ssh://runner@203.0.113.10",
+            identity_file=key,
+            case_path=root,
+            isolation="remote-vm",
+            run_id="demo-run",
+        )
+    sec = plan["security"]
+    blob = " ".join(sec.get("credential_spillage_controls", [])).lower()
+    assert "network disabled" not in blob, sec
+    assert "only artifact allowlist is copied back" not in blob, sec
+    assert sec["isolation_enforced"] is False, sec
+    assert sec["network"]["enforced"] is False, sec
+    advisory = " ".join(sec.get("not_enforced_here", [])).lower()
+    assert "not enforced" in advisory and "infrastructure" in advisory, sec
+    assert "advisory" in advisory, sec
+
+
+def test_container_mode_marks_isolation_enforced():
+    with tempfile.TemporaryDirectory() as root:
+        key = os.path.join(root, "runner_key")
+        open(key, "w", encoding="utf-8").close()
+        plan = build_remote_runner_plan(
+            remote="ssh://runner@203.0.113.10",
+            identity_file=key,
+            case_path=root,
+            isolation="container",
+            run_id="demo-run",
+        )
+    sec = plan["security"]
+    assert sec["isolation_enforced"] is True, sec
+    assert sec["network"]["enforced"] is True, sec   # --network none unless allow_network_run
+
+
 def _run_all():
     fns = sorted((n, fn) for n, fn in globals().items() if n.startswith("test_") and callable(fn))
     failed = 0

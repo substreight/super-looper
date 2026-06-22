@@ -147,7 +147,7 @@ run_loop(spec, *, propose, verify, store, clock=...) -> RunResult
 
 ## 2.2 — Quarantine the runner transport  *(folds in lazy CLI imports; closes #12/#13 by relegation)*
 
-> **Status:** ✅ **relocation + lazy imports DONE** (with 2.4's harness quarantine): `case_study.py` and `remote_runner.py` moved to `super_looper/experimental/`; thin back-compat shims at the old import paths; all 12 perimeter CLI handlers lazy-import their module so `validate`/`run`/`explain`/`max-autonomy` load **none** of them (`test_cli_lazy` proves it in a subprocess). ⏳ **Remaining 2.2:** strip the asserted-but-unenforced security controls (#12 unconditional "network disabled" / #13 metadata-only allowlist) from the emitted runner plan, and (optional) move the `runner`/heavy `case-study` CLI verbs under an `experimental` namespace.
+> **Status:** ✅ **DONE.** (a) `case_study.py` + `remote_runner.py` moved to `super_looper/experimental/` with thin back-compat shims; (b) all 12 perimeter CLI handlers lazy-import so `validate`/`run`/`explain`/`max-autonomy` load **none** of them (`test_cli_lazy` proves it in a subprocess); (c) **#12/#13 honesty** — the emitted runner plan no longer asserts controls it doesn't enforce: `isolation_enforced` is true only in container mode, `network.enforced` reflects reality, and `not_enforced_here` states plainly that remote-vm mode isn't sandboxed and the artifact allowlist is advisory. *(Optional, deferred: move the `runner`/heavy `case-study` CLI verbs under an `experimental` namespace — low value now that they're physically relegated + lazy.)*
 
 **Goal:** stop presenting bespoke SSH/container orchestration as the product.
 
