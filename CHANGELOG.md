@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased - 0.7.3
+## 0.7.3 - 2026-06-23
 
 - **Repo audit - verify-gates hardening:** `--verify-gates` now refuses shell-control/redirection/substitution strings before execution, recomputes network/destructive flags at the execution boundary, and broadens default skips for fetch/install/removal commands. Crafted CI `run:` steps can no longer smuggle side effects through verifier-looking commands such as `pytest --version > file`.
 
