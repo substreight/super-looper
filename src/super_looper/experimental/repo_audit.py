@@ -281,7 +281,7 @@ def _is_destructive(command: str) -> bool:
 # repository chain extra commands, redirect/overwrite files, exfiltrate over a
 # pipe, or substitute arbitrary output -- bypassing the network/destructive
 # skip heuristics entirely. We refuse to execute such strings.
-_SHELL_CONTROL_RE = re.compile(r"(\|\||&&|[|&;<>`\n\r]|\$\(|\$\{|>>|<<)")
+_SHELL_CONTROL_RE = re.compile(r"(\|\||&&|[|&;<>`\n\r]|\$\(|\$\{|>>|<<|\$[A-Za-z_])")
 
 
 def _has_shell_control_metacharacters(command: str) -> bool:
@@ -290,9 +290,11 @@ def _has_shell_control_metacharacters(command: str) -> bool:
     Legitimate verifier gates discovered from configs (``make test``,
     ``python -m pytest``, ``cargo clippy ... -- -D warnings``, ``ruff check .``)
     are single program invocations and never need pipes, redirects, chaining,
-    command substitution, or backgrounding. A repository that smuggles those
-    operators into a "verifier" is trying to turn ``--verify-gates`` into an
-    arbitrary-shell primitive, so we decline to run it.
+    command substitution, variable expansion, or backgrounding. A repository
+    that smuggles those operators into a "verifier" is trying to turn
+    ``--verify-gates`` into an arbitrary-shell primitive, so we decline to run
+    it. Bare ``$VAR`` expansion is included: a crafted gate can otherwise read
+    runner environment (``$HOME``/``$PATH``/secrets) under ``shell=True``.
     """
     return bool(_SHELL_CONTROL_RE.search(command or ""))
 

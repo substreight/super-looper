@@ -473,6 +473,31 @@ def test_builtin_rejects_unknown_policy_network_key():
     assert any("network" in e and "bogus" in e for e in errs), errs
 
 
+# ---- the zero-dep checker rejects unknown/typo'd keys in EVERY object, like the schema ----
+
+def test_builtin_rejects_unknown_scope_key():
+    s = _spec()
+    s["scope"] = {"may_touch": ["src/"], "must_not_tuch": ["prod/"]}  # typo: missing 'o'
+    errs = v._builtin_structural(s)
+    assert any("scope" in e and "must_not_tuch" in e for e in errs), errs
+
+
+def test_builtin_rejects_unknown_keys_across_objects():
+    s = _spec()
+    s["goal"]["end_stat"] = "typo"            # typo: missing 'e' on end_state
+    s["autonomy"]["provven_manual_pass"] = True  # typo
+    errs = v._builtin_structural(s)
+    assert any("goal" in e and "end_stat" in e for e in errs), errs
+    assert any("autonomy" in e and "provven_manual_pass" in e for e in errs), errs
+
+
+def test_builtin_rejects_unknown_top_level_key():
+    s = _spec()
+    s["triger"] = {"type": "schedule"}        # typo: 'trigger'
+    errs = v._builtin_structural(s)
+    assert any("triger" in e for e in errs), errs
+
+
 def test_schemas_in_sync():
     a = os.path.join(HERE, "..", "schemas", "loop-spec.schema.json")
     b = os.path.join(HERE, "..", "src", "super_looper", "resources", "loop-spec.schema.json")

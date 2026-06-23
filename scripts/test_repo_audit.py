@@ -329,6 +329,8 @@ def test_has_shell_control_metacharacters_allows_real_gates():
         "echo $(whoami)",
         "echo ${HOME}",
         "pytest `id`",
+        "echo $HOME",          # bare variable expansion: a crafted gate must not read runner env
+        "cp $SECRET out",
     ):
         assert _has_shell_control_metacharacters(hostile) is True, hostile
 

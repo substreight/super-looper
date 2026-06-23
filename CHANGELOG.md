@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5 - 2026-06-23
+Integrity hardening: make the code deliver the guarantees it already documents. Five conservative fixes, each shipped with tests; no behavior change for well-formed input.
+
+- **Case study — direct run no longer claims PR-ready without a confirmed gate.** `case-study run` now seeds an honest evidence level from the declared verifier's file paths, matching `resolve-verifier`. A passing no-path-token verifier (e.g. `make check`) is labeled `unconfirmed` and can no longer reach `ready_for_pr_claim`; only a verifier whose declared repo paths actually exist reaches `confirmed_local`. Closes the hole where the direct path silently bypassed the evidence-as-proof fence.
+- **Repo audit — shell-control boundary also rejects bare `$VAR`.** `_has_shell_control_metacharacters` (the hard `--verify-gates` boundary) now refuses bare parameter expansion (`$HOME`, `$PATH`, `$SECRET`), not just `$(…)` / `${…}`, so a crafted gate can't read runner environment under `shell=True`.
+- **Validator — zero-dep checker now rejects unknown keys in every object.** The built-in structural checker (the default install path) now mirrors the JSON Schema's `additionalProperties: false`, so typos like `scope.must_not_tuch` or `goal.end_stat` fail validation even without `jsonschema` installed. Replaces three bespoke checks with one mechanism.
+- **Case study — atomic evidence writes + clean decode errors.** `_json_write` / `_text_write` now write a temp file and `os.replace`, so a crash mid-write never leaves truncated evidence at the destination; `_json_load` raises a clean `CaseStudyError` on corrupt JSON instead of a raw `JSONDecodeError` traceback.
+- **Eval gate — runs on same-repo PRs; scenarios and baseline kept in sync.** The live skill eval now also fires on same-repo pull requests (forks skipped; secret-gated), so a SKILL.md regression is caught before merge. Added a deterministic test asserting `scenarios.jsonl` ids equal `baseline.passing_ids`, so a new scenario can't silently outrun the no-regression gate. Per-scenario `--baseline` is intentionally NOT applied to the live run — live output is non-deterministic, so requiring all-10-every-run would make CI flaky; the 0.9 floor plus pre-merge coverage is the honest tradeoff.
+
 ## 0.7.4 - 2026-06-23
 
 - **Repo audit - richer environment classification:** verified gate failures caused by a toolchain mismatch (e.g. a workflow using nightly-only cargo `-Z` flags under stable) are now classified `toolchain_required`, and permission/sandbox denials (`Access is denied`, `could not create temp file`, `EACCES`) are classified `permission_blocked`, instead of being reported as real `failed`. Both map to `unverified` confirmed strength.
