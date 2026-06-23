@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - 0.7.3
+
+- **Repo audit - verify-gates hardening:** `--verify-gates` now refuses shell-control/redirection/substitution strings before execution, recomputes network/destructive flags at the execution boundary, and broadens default skips for fetch/install/removal commands. Crafted CI `run:` steps can no longer smuggle side effects through verifier-looking commands such as `pytest --version > file`.
+
 ## 0.7.2 - 2026-06-23
 
 - **Repo audit - Cargo network classification:** Cargo/crates.io verifier failures from locked-down dogfood environments are now classified as `network_blocked` instead of generic `failed`, keeping verified audit output honest about environment limits.

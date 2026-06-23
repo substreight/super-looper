@@ -214,12 +214,87 @@ def _gate_strength(category: str, command: str, source: str) -> str:
 
 def _requires_network(command: str) -> bool:
     lower = command.lower()
-    return any(term in lower for term in (" install", "pip install", "npm install", "pnpm install", "yarn install", "cargo fetch", "go get", "docker pull"))
+    return any(term in lower for term in (
+        "http://",
+        "https://",
+        "curl ",
+        "wget ",
+        "pip install",
+        "python -m pip install",
+        "python3 -m pip install",
+        "uv pip install",
+        "npm install",
+        "npm ci",
+        "pnpm install",
+        "pnpm i ",
+        "yarn install",
+        "cargo fetch",
+        "cargo update",
+        "go get",
+        "go mod download",
+        "git clone",
+        "git fetch",
+        "git pull",
+        "docker pull",
+        "docker build",
+    ))
 
 
 def _is_destructive(command: str) -> bool:
     lower = command.lower()
-    return any(term in lower for term in (" rm -rf ", "git push", "publish", "deploy", "release", "terraform apply"))
+    return any(term in lower for term in (
+        " rm -rf ",
+        " rm -fr ",
+        " rm -r ",
+        " rm -f ",
+        "rm -rf ",
+        "rm -fr ",
+        "rm -r ",
+        "git clean",
+        "git reset --hard",
+        "git push",
+        "find . -delete",
+        "find . -exec rm",
+        "del ",
+        "erase ",
+        "rmdir ",
+        "remove-item",
+        "npm uninstall",
+        "npm rm ",
+        "npm remove",
+        "pnpm remove",
+        "yarn remove",
+        "cargo uninstall",
+        "cargo remove",
+        "truncate ",
+        "mkfs",
+        "publish",
+        "deploy",
+        "release",
+        "terraform apply",
+    ))
+
+
+# Control / redirection / substitution operators a benign verifier gate never
+# needs. Their presence means the discovered string is more than a single
+# program invocation, so running it under ``shell=True`` would let a crafted
+# repository chain extra commands, redirect/overwrite files, exfiltrate over a
+# pipe, or substitute arbitrary output -- bypassing the network/destructive
+# skip heuristics entirely. We refuse to execute such strings.
+_SHELL_CONTROL_RE = re.compile(r"(\|\||&&|[|&;<>`\n\r]|\$\(|\$\{|>>|<<)")
+
+
+def _has_shell_control_metacharacters(command: str) -> bool:
+    """True if a gate command contains shell control/redirection/substitution.
+
+    Legitimate verifier gates discovered from configs (``make test``,
+    ``python -m pytest``, ``cargo clippy ... -- -D warnings``, ``ruff check .``)
+    are single program invocations and never need pipes, redirects, chaining,
+    command substitution, or backgrounding. A repository that smuggles those
+    operators into a "verifier" is trying to turn ``--verify-gates`` into an
+    arbitrary-shell primitive, so we decline to run it.
+    """
+    return bool(_SHELL_CONTROL_RE.search(command or ""))
 
 
 def _split_ci_command(command: str) -> List[str]:
@@ -567,13 +642,23 @@ def verify_gate_inventory(
     for gate in gates:
         item = dict(gate)
         command = str(item.get("command") or "")
+        requires_network = bool(item.get("requires_network")) or _requires_network(command)
+        destructive = bool(item.get("destructive")) or _is_destructive(command)
+        item["requires_network"] = requires_network
+        item["destructive"] = destructive
         verification: Dict[str, Any] = {
             "status": "not_run",
             "timeout_seconds": timeout_seconds,
         }
-        if item.get("requires_network") and not allow_network:
+        if _has_shell_control_metacharacters(command):
+            # Never hand a shell-control string to ``shell=True``. This is the
+            # hard boundary: heuristic network/destructive skips operate on
+            # substrings and can be evaded, so anything that is not a single
+            # plain invocation is refused outright rather than sniffed.
+            verification["status"] = "skipped_unsafe_command"
+        elif requires_network and not allow_network:
             verification["status"] = "skipped_requires_network"
-        elif item.get("destructive") and not allow_destructive:
+        elif destructive and not allow_destructive:
             verification["status"] = "skipped_destructive"
         else:
             started = time.monotonic()
