@@ -275,6 +275,15 @@ def test_classify_gate_failure_distinguishes_environment_from_real_failure():
         stderr="HTTPSConnection(host='pypi.org', port=443): Failed to establish a new connection",
     ) == "network_blocked"
     assert _classify_gate_failure(
+        "cargo test",
+        stderr=(
+            "failed to download from `https://index.crates.io/config.json`\n\n"
+            "Caused by:\n"
+            "  [7] Could not connect to server (Failed to connect to "
+            "index.crates.io port 443 after 0 ms: Could not connect to server)"
+        ),
+    ) == "network_blocked"
+    assert _classify_gate_failure(
         "python -m pytest",
         stderr="FAILED tests/test_app.py::test_app - AssertionError",
     ) == "failed"

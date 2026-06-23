@@ -650,6 +650,10 @@ def _classify_gate_failure(command: str, stdout: str = "", stderr: str = "", err
         "network is unreachable",
         "pypi.org",
         "registry.npmjs.org",
+        "index.crates.io",
+        "crates.io",
+        "failed to download from",
+        "could not connect to server",
         "could not find a version that satisfies the requirement",
         "no matching distribution found",
     )

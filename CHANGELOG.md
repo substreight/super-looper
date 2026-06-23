@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased - 0.7.2
+
+- **Repo audit - Cargo network classification:** Cargo/crates.io verifier failures from locked-down dogfood environments are now classified as `network_blocked` instead of generic `failed`, keeping verified audit output honest about environment limits.
+
 ## 0.7.1 - 2026-06-22
 Follow-up polish after the 0.7.0 release.
 
