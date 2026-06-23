@@ -380,6 +380,22 @@ def test_measurable_tool_gate_still_earns_l3():
     assert level == "L3", level
 
 
+def test_tool_gate_with_nothing_else_earns_exactly_l1():
+    # The autonomy FLOOR: a rung-1 tool gate with no budget, no scope fence, and no
+    # trigger earns exactly L1 (not L0, not L2). L0 is reserved for won't-run/
+    # discovery; L2 needs the guardrails. Pins that the floor can't drift to L0/L2.
+    s = _spec()
+    s["scope"].pop("must_not_touch", None)    # remove the blast-radius fence
+    s["stop_conditions"].pop("budget", None)  # remove the budget cap
+    s.pop("trigger", None)                    # no trigger
+    s["autonomy"].pop("requested", None)      # read the ceiling only
+    level, missing = v.max_autonomy(s)
+    assert level == "L1", (level, missing)
+    missing_txt = " ".join(missing).lower()
+    assert "budget" in missing_txt, missing
+    assert "must_not_touch" in missing_txt, missing
+
+
 # ---- Fix 1.2: the zero-dep checker rejects unknown/typo'd budget keys ----
 
 def test_builtin_rejects_typod_budget_key():

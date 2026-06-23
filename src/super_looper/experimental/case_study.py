@@ -158,12 +158,14 @@ def design_case_study(manifest_path: str) -> Dict[str, Any]:
     }
     if spec is not None:
         loop_path = _resolve_relative(base_dir, manifest.get("loop_spec") or "loop.json")
-        assert loop_path is not None
+        if loop_path is None:
+            raise CaseStudyError("could not resolve loop_spec path from the manifest")
         _json_write(loop_path, spec)
         result["loop_spec"] = _rel(base_dir, loop_path)
         result["max_autonomy"] = max_autonomy(spec)[0]
     design_report_path = _resolve_relative(base_dir, manifest.get("design_report") or "design-report.json")
-    assert design_report_path is not None
+    if design_report_path is None:
+        raise CaseStudyError("could not resolve design_report path from the manifest")
     _json_write(design_report_path, result)
     return result
 
@@ -417,7 +419,8 @@ def run_case_study(
 
     loop_spec = _load_loop_spec(base_dir, manifest)
     run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
-    assert run_root is not None
+    if run_root is None:
+        raise CaseStudyError("could not resolve the runs directory from the manifest")
     run_dir = os.path.join(run_root, run_id or _utc_id())
     os.makedirs(run_dir, exist_ok=True)
 
@@ -691,7 +694,8 @@ def simulate_sketch_verifier(
         loop_spec = _load_loop_spec(base_dir, manifest)
 
     run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
-    assert run_root is not None
+    if run_root is None:
+        raise CaseStudyError("could not resolve the runs directory from the manifest")
     run_dir = os.path.join(run_root, run_id or _utc_id())
     os.makedirs(run_dir, exist_ok=True)
 
@@ -817,7 +821,8 @@ def _missing_verifier_run(
         design_case_study(manifest_path)
         loop_spec = _load_loop_spec(base_dir, manifest)
     run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
-    assert run_root is not None
+    if run_root is None:
+        raise CaseStudyError("could not resolve the runs directory from the manifest")
     run_dir = os.path.join(run_root, run_id or _utc_id())
 
     _base_run_artifacts(

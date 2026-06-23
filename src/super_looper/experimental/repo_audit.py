@@ -300,8 +300,14 @@ def _has_shell_control_metacharacters(command: str) -> bool:
 
 
 def _split_ci_command(command: str) -> List[str]:
-    """Split simple chained CI commands into auditable verifier candidates."""
-    return [part.strip() for part in re.split(r"\s+(?:&&|\|\|)\s+|;\s*", command) if part.strip()]
+    """Split simple chained CI commands into auditable verifier candidates.
+
+    Splits on ``&&``/``||``/``;`` regardless of surrounding whitespace, so
+    ``ruff .&&pytest`` (no spaces) splits just like ``ruff . && pytest`` -- the
+    discovery layer must split before the verify layer refuses chained commands,
+    or a real gate is silently dropped.
+    """
+    return [part.strip() for part in re.split(r"\s*(?:&&|\|\||;)\s*", command) if part.strip()]
 
 
 def _is_setup_or_log_command(command: str) -> bool:
@@ -625,6 +631,13 @@ def discover_gates(repo_path: str, files: Optional[Sequence[str]] = None, max_fi
     ]
 
 
+# Cap on captured stdout/stderr persisted per verified gate. Gate output is written
+# into repo-audit.json and may contain secrets (tokens, env values); a bounded tail
+# keeps enough of the failure signal to triage without making the audit a bulk
+# exfiltration channel.
+_VERIFY_OUTPUT_TAIL = 500
+
+
 def verify_gate_inventory(
     repo_path: str,
     gates: Sequence[Dict[str, Any]],
@@ -685,18 +698,18 @@ def verify_gate_inventory(
                 if completed.returncode != 0 and status != "failed":
                     verification["raw_status"] = "failed"
                 if completed.stdout:
-                    verification["stdout_tail"] = completed.stdout[-2000:]
+                    verification["stdout_tail"] = completed.stdout[-_VERIFY_OUTPUT_TAIL:]
                 if completed.stderr:
-                    verification["stderr_tail"] = completed.stderr[-2000:]
+                    verification["stderr_tail"] = completed.stderr[-_VERIFY_OUTPUT_TAIL:]
             except subprocess.TimeoutExpired as exc:
                 verification.update({
                     "status": "timeout",
                     "duration_seconds": round(time.monotonic() - started, 3),
                 })
                 if exc.stdout:
-                    verification["stdout_tail"] = str(exc.stdout)[-2000:]
+                    verification["stdout_tail"] = str(exc.stdout)[-_VERIFY_OUTPUT_TAIL:]
                 if exc.stderr:
-                    verification["stderr_tail"] = str(exc.stderr)[-2000:]
+                    verification["stderr_tail"] = str(exc.stderr)[-_VERIFY_OUTPUT_TAIL:]
             except OSError as exc:
                 status = _classify_gate_failure(command, error=str(exc))
                 verification.update({
