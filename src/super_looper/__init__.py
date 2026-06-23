@@ -4,7 +4,7 @@ from .design import build_spec, classify_answers, render_decision
 from .runtime import RunResult, run_loop
 from .validate import max_autonomy, render, render_check, render_plain, validate
 
-__version__ = "0.7.5"
+__version__ = "0.7.6"
 
 __all__ = [
     "__version__",

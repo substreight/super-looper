@@ -8,6 +8,7 @@ Runs under pytest, or standalone:  python test_cli.py
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -18,6 +19,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from super_looper.cli import build_parser, main as cli_main  # noqa: E402
+from super_looper.design import VERDICTS  # noqa: E402
 
 GOOD = os.path.join(ROOT, "examples", "nightly-export.loop.json")
 UNKNOWN_ANSWERS = os.path.join(ROOT, "examples", "unknown-gate.answers.json")
@@ -115,6 +117,62 @@ def test_top_level_help_shows_core_plus_lab_not_legacy_perimeter_aliases():
     assert "repo                " not in help_text
     assert "case-study          " not in help_text
     assert "runner              " not in help_text
+
+
+# ---- contract: the public surface the on-ramp depends on must not drift ----
+
+def test_version_is_stable_semver():
+    # `super-looper --version` (run in CI smoke) must stay "super-looper X.Y.Z".
+    from super_looper import __version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+", __version__), __version__
+
+
+def test_every_subcommand_has_working_help():
+    # Every registered subcommand (incl. hidden compat ones) must accept --help
+    # and exit 0 with non-empty output. Catches a broken subparser or a renamed
+    # command before it reaches a user.
+    parser = build_parser()
+    sub_action = next(
+        a for a in parser._actions
+        if isinstance(getattr(a, "choices", None), dict) and "check" in a.choices
+    )
+    commands = list(sub_action.choices)
+    assert {"check", "validate", "decide", "run", "lab", "doctor"} <= set(commands), commands
+    for cmd in commands:
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                parser.parse_args([cmd, "--help"])
+            raise AssertionError(f"{cmd!r} --help did not exit")
+        except SystemExit as exc:
+            assert exc.code in (0, None), f"{cmd!r} --help exited {exc.code!r}"
+        assert buf.getvalue().strip(), f"{cmd!r} --help printed nothing"
+
+
+def test_every_example_loop_spec_validates_clean():
+    # The examples are the on-ramp; a spec that drifts into invalidity is a bad
+    # first impression and would pass CI today (only nightly-export is exercised).
+    import glob
+    paths = sorted(glob.glob(os.path.join(ROOT, "examples", "*.loop.json")))
+    assert paths, "no example loop specs found"
+    for path in paths:
+        rc, out = _capture(["check", path, "--json"])
+        assert rc == 0, (path, out)
+        payload = json.loads(out)
+        assert payload["errors"] == [], (os.path.basename(path), payload["errors"])
+
+
+def test_every_example_answers_fixture_compiles_to_a_verdict():
+    # Every interview fixture must compile to a known verdict via `decide`.
+    import glob
+    paths = sorted(glob.glob(os.path.join(ROOT, "examples", "*.answers.json")))
+    assert paths, "no example answers fixtures found"
+    for path in paths:
+        rc, out = _capture(["decide", "--answers", path, "--json"])
+        assert rc == 0, (os.path.basename(path), out)
+        payload = json.loads(out)
+        verdict = payload["report"]["verdict"]
+        assert verdict in VERDICTS, (os.path.basename(path), verdict)
 
 
 def _run_all():

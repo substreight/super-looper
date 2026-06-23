@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.6 - 2026-06-23
+Contract tests, surfaced by dogfooding — `super-looper lab repo audit --repo-path .` run on super-looper itself. Test-only; no functional change to the installed package.
+
+- **Every example is now covered.** Added tests that validate every `examples/*.loop.json` and compile every `examples/*.answers.json` to a known verdict. Previously CI exercised only `nightly-export.loop.json` and `unknown-gate.answers.json`, so a schema or verdict-engine change that silently broke the other examples (ts-client, headroom-ast-compression, untrusted-suite) would have passed.
+- **CLI contract pinned.** Added tests asserting the version is stable semver and that every registered subcommand (including hidden compat aliases) accepts `--help` and exits 0, so a broken or renamed command can't reach a user.
+
+The self-audit returned a fitting verdict: pointed at itself, super-looper classified every automation candidate `plain_scheduler` / `human_in_loop` / `discovery_required` / `do_not_automate` — zero autonomous loops — and explicitly rejected "make the repo better" automation.
+
 ## 0.7.5 - 2026-06-23
 Integrity hardening in two batches: make the code deliver the guarantees it already documents, then pin the core invariants. Every change only tightens or adds coverage; no behavior change for well-formed input.
 
