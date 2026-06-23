@@ -16,6 +16,7 @@ from super_looper.experimental.repo_audit import (  # noqa: E402
     audit_repo,
     default_promotion_out_dir,
     render_ranked_backlog,
+    render_recommendations,
     verify_gate_inventory,
     _add_gate,
     _classify_gate_failure,
@@ -457,6 +458,69 @@ def test_classify_gate_failure_distinguishes_environment_from_real_failure():
         "python -m pytest",
         stderr="FAILED tests/test_app.py::test_app - AssertionError",
     ) == "failed"
+
+
+def test_classify_gate_failure_toolchain_and_permission():
+    # rust-lang/log style: nightly-only -Z flag run under stable cargo.
+    assert _classify_gate_failure(
+        "cargo build --verbose -Z minimal-versions --features kv",
+        stderr=(
+            "error: the `-Z` flag is only accepted on the nightly channel of "
+            "Cargo, but this is the `stable` channel"
+        ),
+    ) == "toolchain_required"
+    # rustup selecting an uninstalled toolchain.
+    assert _classify_gate_failure(
+        "cargo +nightly test",
+        stderr="error: toolchain 'nightly-x86_64-pc-windows-gnu' is not installed",
+    ) == "toolchain_required"
+    # dtolnay/anyhow style: rustup could not create a temp file (Windows).
+    assert _classify_gate_failure(
+        "cargo test",
+        stderr=(
+            "info: syncing channel updates for 'stable-x86_64-pc-windows-gnu'\n"
+            "error: could not create temp file "
+            "C:\\Users\\jpmah\\.rustup\\tmp\\or54jc8qyyym2e7d_file: Access is denied. (os error 5)"
+        ),
+    ) == "permission_blocked"
+    # Generic POSIX permission denial.
+    assert _classify_gate_failure(
+        "make test",
+        stderr="/bin/sh: ./run.sh: Permission denied",
+    ) == "permission_blocked"
+    # Network classification still wins for crates.io fetch failures.
+    assert _classify_gate_failure(
+        "cargo test",
+        stderr="Updating crates.io index\nwarning: spurious network error: Could not connect to server",
+    ) == "network_blocked"
+    # A genuine compile/test failure is still 'failed', not a false toolchain hit.
+    assert _classify_gate_failure(
+        "cargo test",
+        stderr="error[E0277]: the trait bound is not satisfied\nerror: could not compile `log`",
+    ) == "failed"
+
+
+def test_recommendations_include_environment_readiness_after_verify():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        _write(repo, "tests/test_pkg.py", "def test_pkg():\n    assert True\n")
+        _write(repo, "pyproject.toml", "[tool.pytest.ini_options]\n")
+        audit = audit_repo(repo, verify_gates=True, gate_timeout_seconds=30)
+    text = render_recommendations(audit)
+    assert "## Environment Readiness (verified pass)" in text
+    assert "Gates confirmed passing:" in text
+
+
+def test_recommendations_omit_environment_readiness_without_verify():
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        _write(repo, "tests/test_pkg.py", "def test_pkg():\n    assert True\n")
+        _write(repo, "pyproject.toml", "[tool.pytest.ini_options]\n")
+        audit = audit_repo(repo, verify_gates=False)
+    text = render_recommendations(audit)
+    assert "## Environment Readiness" not in text
 
 
 def test_repo_audit_verify_gates_confirms_discovered_pytest_gate():
