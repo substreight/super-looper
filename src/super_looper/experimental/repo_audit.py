@@ -745,6 +745,44 @@ def _classify_gate_failure(command: str, stdout: str = "", stderr: str = "", err
     if any(marker in text for marker in network_markers):
         return "network_blocked"
 
+    # A toolchain mismatch (e.g. a workflow that uses nightly-only cargo `-Z`
+    # flags run under stable, or a missing/!=pinned toolchain) is not proof the
+    # repository is broken -- it means the verifier needs a different toolchain
+    # than the one present on this machine.
+    toolchain_markers = (
+        "the `-z` flag is only accepted on the nightly channel",
+        "-z flag is only accepted on the nightly channel",
+        "this is the `stable` channel",
+        "requires nightly",
+        "requires the nightly",
+        "nightly-only",
+        "can only be used on the nightly",
+        "rustup toolchain install",
+        "toolchain' is not installed",  # rustup: "toolchain 'nightly-...' is not installed"
+        "error: toolchain '",            # rustup toolchain selection error
+        "rustup component add",
+    )
+    if any(marker in text for marker in toolchain_markers):
+        return "toolchain_required"
+
+    # Permission / sandbox denials are environment state, not a repo defect:
+    # the verifier could not write a temp file, open a socket-less path, etc.
+    permission_markers = (
+        "access is denied",
+        "permission denied",
+        "operation not permitted",
+        "could not create temp file",
+        "could not create temporary",
+        "[winerror 5]",
+        "os error 5",
+        "eacces",
+        "eperm",
+        ".rustup\\tmp",
+        ".rustup/tmp",
+    )
+    if any(marker in text for marker in permission_markers):
+        return "permission_blocked"
+
     tool_markers = (
         "is not recognized as an internal or external command",
         "command not found",
@@ -801,7 +839,13 @@ def _confirmed_gate_strength(gate: Dict[str, Any]) -> str:
         return str(gate.get("strength") or "weak")
     if status in {"failed", "timeout", "error"}:
         return "failed"
-    if status in {"tool_missing", "setup_required", "network_blocked"}:
+    if status in {
+        "tool_missing",
+        "setup_required",
+        "network_blocked",
+        "toolchain_required",
+        "permission_blocked",
+    }:
         return "unverified"
     if status and status.startswith("skipped"):
         return "unverified"
@@ -1891,6 +1935,32 @@ def render_ranked_backlog(audit: Dict[str, Any]) -> str:
 
 
 def render_recommendations(audit: Dict[str, Any]) -> str:
+    # Human-readable environment-readiness readout. When --verify-gates ran, most
+    # non-passes are usually "this machine can't prove the gate" rather than
+    # "the repo is broken". Surface that explicitly so a reader isn't misled.
+    _ENV_STATUS_LABELS = [
+        ("passed", "confirmed passing"),
+        ("failed", "real failures to inspect"),
+        ("timeout", "timed out (budget too low or long-running)"),
+        ("error", "runner error"),
+        ("tool_missing", "missing tool/verifier"),
+        ("setup_required", "setup/deps not installed"),
+        ("network_blocked", "network blocked (registry/index unreachable)"),
+        ("toolchain_required", "toolchain mismatch (e.g. needs nightly)"),
+        ("permission_blocked", "permission/sandbox denied"),
+        ("skipped_requires_network", "skipped: needs network"),
+        ("skipped_destructive", "skipped: looks destructive"),
+        ("skipped_unsafe_command", "skipped: shell-control/redirection refused"),
+        ("not_run", "not run"),
+    ]
+    verification_counts = audit.get("summary", {}).get("gate_verification_counts", {}) or {}
+    # Only treat verification as "attempted" if at least one gate has a real
+    # status. Without --verify-gates every gate is `not_run`, and we should not
+    # render a readiness section that implies a run happened.
+    verification_attempted = any(
+        status != "not_run" and count
+        for status, count in verification_counts.items()
+    )
     top = [
         c
         for c in audit["automation_candidates"]
@@ -1965,6 +2035,34 @@ def render_recommendations(audit: Dict[str, Any]) -> str:
     ])
     for kind, count in audit["summary"].get("surface_counts", {}).items():
         lines.append(f"- {kind}: {count}")
+    if verification_attempted:
+        confirmed = verification_counts.get("passed", 0)
+        non_pass = sum(
+            v for k, v in verification_counts.items()
+            if k not in {"passed", "not_run"}
+        )
+        lines.extend([
+            "",
+            "## Environment Readiness (verified pass)",
+            "",
+            "Gate verification was attempted on this checkout. Non-passing results are usually "
+            "environment readiness signals (missing tools, setup, network, toolchain, permissions), "
+            "not proof the repository is broken. Only `real failures to inspect` deserve a closer look.",
+            "",
+            f"- Gates confirmed passing: {confirmed}",
+            f"- Gates not confirmed on this machine: {non_pass}",
+            "",
+        ])
+        for status, label in _ENV_STATUS_LABELS:
+            count = verification_counts.get(status)
+            if count:
+                lines.append(f"- {label} (`{status}`): {count}")
+        leftovers = sorted(
+            status for status in verification_counts
+            if status not in {key for key, _ in _ENV_STATUS_LABELS}
+        )
+        for status in leftovers:
+            lines.append(f"- `{status}`: {verification_counts[status]}")
     return "\n".join(lines).rstrip() + "\n"
 
 

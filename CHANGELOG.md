@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased - 0.7.4
+
+- **Repo audit - richer environment classification:** verified gate failures caused by a toolchain mismatch (e.g. a workflow using nightly-only cargo `-Z` flags under stable) are now classified `toolchain_required`, and permission/sandbox denials (`Access is denied`, `could not create temp file`, `EACCES`) are classified `permission_blocked`, instead of being reported as real `failed`. Both map to `unverified` confirmed strength.
+- **Repo audit - environment readiness readout:** `recommendations.md` now includes an "Environment Readiness" section after a `--verify-gates` run, summarizing how many gates were confirmed passing versus not confirmable on this machine (missing tools, setup, network, toolchain, permissions), so a reader is not misled into thinking the repository is broken.
+
 ## 0.7.3 - 2026-06-23
 
 - **Repo audit - verify-gates hardening:** `--verify-gates` now refuses shell-control/redirection/substitution strings before execution, recomputes network/destructive flags at the execution boundary, and broadens default skips for fetch/install/removal commands. Crafted CI `run:` steps can no longer smuggle side effects through verifier-looking commands such as `pytest --version > file`.
