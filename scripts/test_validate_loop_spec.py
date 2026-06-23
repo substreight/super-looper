@@ -380,6 +380,22 @@ def test_measurable_tool_gate_still_earns_l3():
     assert level == "L3", level
 
 
+def test_tool_gate_with_nothing_else_earns_exactly_l1():
+    # The autonomy FLOOR: a rung-1 tool gate with no budget, no scope fence, and no
+    # trigger earns exactly L1 (not L0, not L2). L0 is reserved for won't-run/
+    # discovery; L2 needs the guardrails. Pins that the floor can't drift to L0/L2.
+    s = _spec()
+    s["scope"].pop("must_not_touch", None)    # remove the blast-radius fence
+    s["stop_conditions"].pop("budget", None)  # remove the budget cap
+    s.pop("trigger", None)                    # no trigger
+    s["autonomy"].pop("requested", None)      # read the ceiling only
+    level, missing = v.max_autonomy(s)
+    assert level == "L1", (level, missing)
+    missing_txt = " ".join(missing).lower()
+    assert "budget" in missing_txt, missing
+    assert "must_not_touch" in missing_txt, missing
+
+
 # ---- Fix 1.2: the zero-dep checker rejects unknown/typo'd budget keys ----
 
 def test_builtin_rejects_typod_budget_key():
@@ -471,6 +487,31 @@ def test_builtin_rejects_unknown_policy_network_key():
            "artifacts": "allowlist"}
     errs = v._builtin_structural(_untrusted(policy=bad))
     assert any("network" in e and "bogus" in e for e in errs), errs
+
+
+# ---- the zero-dep checker rejects unknown/typo'd keys in EVERY object, like the schema ----
+
+def test_builtin_rejects_unknown_scope_key():
+    s = _spec()
+    s["scope"] = {"may_touch": ["src/"], "must_not_tuch": ["prod/"]}  # typo: missing 'o'
+    errs = v._builtin_structural(s)
+    assert any("scope" in e and "must_not_tuch" in e for e in errs), errs
+
+
+def test_builtin_rejects_unknown_keys_across_objects():
+    s = _spec()
+    s["goal"]["end_stat"] = "typo"            # typo: missing 'e' on end_state
+    s["autonomy"]["provven_manual_pass"] = True  # typo
+    errs = v._builtin_structural(s)
+    assert any("goal" in e and "end_stat" in e for e in errs), errs
+    assert any("autonomy" in e and "provven_manual_pass" in e for e in errs), errs
+
+
+def test_builtin_rejects_unknown_top_level_key():
+    s = _spec()
+    s["triger"] = {"type": "schedule"}        # typo: 'trigger'
+    errs = v._builtin_structural(s)
+    assert any("triger" in e for e in errs), errs
 
 
 def test_schemas_in_sync():

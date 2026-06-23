@@ -98,13 +98,20 @@ jobs:
 
   skill-eval:
     # The REAL skill gate: run SKILL.md blind over each scenario and score the LIVE output,
-    # so a regression in the skill's reasoning actually fails CI. Push-to-main + nightly + manual.
-    # Secret-gated: fork PRs (no secret access) and branch pushes are skipped cleanly, never failed.
+    # so a regression in the skill's reasoning actually fails CI. Runs on push-to-main, nightly,
+    # manual dispatch, AND same-repo pull requests (so a SKILL.md regression is caught before
+    # merge, not after). Fork PRs are skipped (no secret access); the HAVE_KEY guard below skips
+    # cleanly when the secret is absent. NOTE: this spends Opus over all scenarios per same-repo
+    # PR -- the safety net for skill changes. Per-scenario --baseline is intentionally NOT applied
+    # on the live run: live model output is non-deterministic, so requiring all-10-every-run would
+    # make CI flaky; the 0.9 floor plus pre-merge coverage is the honest tradeoff.
     runs-on: ubuntu-latest
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/master')
       || github.event_name == 'schedule'
       || github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - uses: actions/checkout@v4
 

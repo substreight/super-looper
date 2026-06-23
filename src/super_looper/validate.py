@@ -207,6 +207,57 @@ ENUMS = {
 
 # ---------- structural validation ----------
 
+# Allowed keys per object, mirroring schemas/loop-spec.schema.json's
+# additionalProperties:false so the zero-dependency checker is exactly as strict
+# as the JSON Schema path. ``meta`` is intentionally open (schema extension point).
+# Keep in sync with the schema; test_schemas_in_sync + the tests below guard drift.
+_ALLOWED_KEYS = {
+    (): frozenset({"name", "goal", "scope", "loop_shape", "trigger", "iteration",
+                   "verifier", "state", "stop_conditions", "on_stop", "report",
+                   "maker", "checker", "execution", "economics", "autonomy", "meta"}),
+    ("goal",): frozenset({"end_state", "evidence", "constraints", "budget"}),
+    ("scope",): frozenset({"may_touch", "must_not_touch"}),
+    ("trigger",): frozenset({"type", "detail", "unattended"}),
+    ("verifier",): frozenset({"rung", "check", "independent", "end_to_end"}),
+    ("state",): frozenset({"architecture", "on_disk", "durable_context", "durable_progress"}),
+    ("stop_conditions",): frozenset({"success", "max_iterations", "budget", "no_progress"}),
+    ("stop_conditions", "budget"): frozenset({"max_tokens", "max_cost_usd", "max_runtime_seconds"}),
+    ("stop_conditions", "no_progress"): frozenset({"signal", "repeats"}),
+    ("report",): frozenset({"destination"}),
+    ("maker",): frozenset({"model", "effort"}),
+    ("checker",): frozenset({"model", "effort"}),
+    ("execution",): frozenset({"parallelism", "isolation", "untrusted", "policy"}),
+    ("execution", "policy"): frozenset({"host_credentials", "network", "artifacts"}),
+    ("execution", "policy", "network"): frozenset({"setup", "verification"}),
+    ("economics",): frozenset({"billing", "proven_cheap"}),
+    ("autonomy",): frozenset({"requested", "output_reversibility", "proven_manual_pass"}),
+}
+
+
+def _check_unknown_keys(spec):
+    """Reject object keys the schema forbids (additionalProperties: false).
+
+    A misspelled field (``must_not_tuch``, ``end_stat``) is otherwise silently
+    ignored, which is the blindest spot of a hand-written checker: the loop runs
+    as if the safety field were absent. One mechanism covers budget/policy/network
+    and every other object, so there is a single source of truth to keep in sync.
+    """
+    errors = []
+    for path, allowed in _ALLOWED_KEYS.items():
+        obj = spec
+        for p in path:
+            obj = obj.get(p) if isinstance(obj, dict) else None
+        if not isinstance(obj, dict):
+            continue
+        where = ".".join(path) if path else "<root>"
+        for key in obj:
+            if key not in allowed:
+                errors.append(
+                    f"{where} has unknown key {key!r} (allowed: {sorted(allowed)}). "
+                    "A misspelled field is silently ignored; fix the typo.")
+    return errors
+
+
 def _builtin_structural(spec):
     """Structural check used when jsonschema isn't installed.
 
@@ -356,11 +407,6 @@ def _builtin_structural(spec):
             if not isinstance(budget, dict) or not budget:
                 errors.append("stop_conditions.budget must be a non-empty object")
             else:
-                allowed_budget = ("max_tokens", "max_runtime_seconds", "max_cost_usd")
-                for bad_key in (k for k in budget if k not in allowed_budget):
-                    errors.append(
-                        f"stop_conditions.budget has unknown key {bad_key!r} "
-                        f"(allowed: {list(allowed_budget)}). A misspelled cap is silently no cap.")
                 for key in ("max_tokens", "max_runtime_seconds"):
                     if key in budget:
                         expect_int(budget, ("stop_conditions", "budget", key), minimum=1)
@@ -382,16 +428,10 @@ def _builtin_structural(spec):
         expect_bool(execution, ("execution", "untrusted"))
         policy = expect_obj(("execution", "policy"))
         if policy is not None:
-            for bad in (k for k in policy if k not in ("host_credentials", "network", "artifacts")):
-                errors.append(f"execution.policy has unknown key {bad!r} "
-                              "(allowed: ['artifacts', 'host_credentials', 'network']).")
             expect_str(policy, ("execution", "policy", "host_credentials"))
             expect_str(policy, ("execution", "policy", "artifacts"))
             net = expect_obj(("execution", "policy", "network"))
             if net is not None:
-                for bad in (k for k in net if k not in ("setup", "verification")):
-                    errors.append(f"execution.policy.network has unknown key {bad!r} "
-                                  "(allowed: ['setup', 'verification']).")
                 expect_str(net, ("execution", "policy", "network", "setup"))
                 expect_str(net, ("execution", "policy", "network", "verification"))
 
@@ -419,6 +459,9 @@ def _builtin_structural(spec):
             val = obj[path[-1]]
             if val not in allowed:
                 errors.append(f"{'.'.join(path)} must be one of {allowed}, got {val!r}")
+
+    # unknown keys in any object (mirrors the schema's additionalProperties:false)
+    errors.extend(_check_unknown_keys(spec))
     return errors
 
 

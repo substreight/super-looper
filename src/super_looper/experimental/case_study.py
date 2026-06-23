@@ -27,26 +27,37 @@ def _utc_id() -> str:
 
 
 def _json_load(path: str) -> Dict[str, Any]:
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        # A crash-truncated evidence file must surface as a clean error, never a
+        # raw parser traceback, so a harness can gate on it instead of crashing.
+        raise CaseStudyError(f"{path} is not valid JSON: {exc.msg}") from exc
     if not isinstance(data, dict):
         raise CaseStudyError(f"{path} must contain a JSON object")
     return data
 
 
 def _json_write(path: str, payload: Dict[str, Any]) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    # Atomic: write a temp sibling then os.replace, so a crash mid-write never
+    # leaves a truncated file at the destination (corrupt evidence).
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
         f.write("\n")
+    os.replace(tmp, path)
 
 
 def _text_write(path: str, text: str) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(text)
         if text and not text.endswith("\n"):
             f.write("\n")
+    os.replace(tmp, path)
 
 
 def _slug(text: str) -> str:
@@ -147,12 +158,14 @@ def design_case_study(manifest_path: str) -> Dict[str, Any]:
     }
     if spec is not None:
         loop_path = _resolve_relative(base_dir, manifest.get("loop_spec") or "loop.json")
-        assert loop_path is not None
+        if loop_path is None:
+            raise CaseStudyError("could not resolve loop_spec path from the manifest")
         _json_write(loop_path, spec)
         result["loop_spec"] = _rel(base_dir, loop_path)
         result["max_autonomy"] = max_autonomy(spec)[0]
     design_report_path = _resolve_relative(base_dir, manifest.get("design_report") or "design-report.json")
-    assert design_report_path is not None
+    if design_report_path is None:
+        raise CaseStudyError("could not resolve design_report path from the manifest")
     _json_write(design_report_path, result)
     return result
 
@@ -406,7 +419,8 @@ def run_case_study(
 
     loop_spec = _load_loop_spec(base_dir, manifest)
     run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
-    assert run_root is not None
+    if run_root is None:
+        raise CaseStudyError("could not resolve the runs directory from the manifest")
     run_dir = os.path.join(run_root, run_id or _utc_id())
     os.makedirs(run_dir, exist_ok=True)
 
@@ -471,6 +485,34 @@ def run_case_study(
     _json_write(os.path.join(run_dir, "scope-check.json"), scope)
     diff_meta = _write_diff(repo_path, run_dir)
     _json_write(os.path.join(run_dir, "diff.json"), diff_meta)
+
+    # Seed an honest evidence level so summarize_run never defaults a direct run to
+    # confirmed_local. A real gate must have its declared file paths present in the
+    # repo; a no-path-token or missing-path verifier (e.g. `make check`) runs but is
+    # 'unconfirmed', and a run with no declared verifier is 'missing'. This mirrors
+    # resolve_verifier's branches so the two paths agree on the same input. The
+    # sketch path never goes through run_case_study, and resolve_verifier overwrites
+    # this file when it drives the run.
+    status = _declared_verifier_status(manifest, repo_path)
+    if skip_verifier or not commands:
+        resolution_status, evidence_level, action = (
+            "declared_verifier_missing", "missing", "no_verifier_run")
+    elif status["path_confirmed"]:
+        resolution_status, evidence_level, action = (
+            "confirmed_gate_found", "confirmed_local", "run_declared_verifier")
+    elif status["has_declared_verifier"]:
+        resolution_status, evidence_level, action = (
+            "declared_verifier_unconfirmed", "unconfirmed", "run_unconfirmed_verifier")
+    else:
+        resolution_status, evidence_level, action = (
+            "declared_verifier_missing", "missing", "no_verifier_run")
+    _json_write(os.path.join(run_dir, "verifier-resolution.json"), {
+        "sketch_enabled": False,
+        "status": resolution_status,
+        "evidence_level": evidence_level,
+        "action": action,
+        **status,
+    })
 
     summary = summarize_run(run_dir)
     _json_write(os.path.join(run_dir, "summary.json"), summary)
@@ -652,7 +694,8 @@ def simulate_sketch_verifier(
         loop_spec = _load_loop_spec(base_dir, manifest)
 
     run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
-    assert run_root is not None
+    if run_root is None:
+        raise CaseStudyError("could not resolve the runs directory from the manifest")
     run_dir = os.path.join(run_root, run_id or _utc_id())
     os.makedirs(run_dir, exist_ok=True)
 
@@ -778,7 +821,8 @@ def _missing_verifier_run(
         design_case_study(manifest_path)
         loop_spec = _load_loop_spec(base_dir, manifest)
     run_root = _resolve_relative(base_dir, manifest.get("runs_dir") or "runs")
-    assert run_root is not None
+    if run_root is None:
+        raise CaseStudyError("could not resolve the runs directory from the manifest")
     run_dir = os.path.join(run_root, run_id or _utc_id())
 
     _base_run_artifacts(

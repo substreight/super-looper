@@ -28,6 +28,19 @@ def test_baseline_passing_ids_loaded():
     assert len(ids) == 10
 
 
+def test_baseline_passing_ids_match_scenario_ids():
+    # Guard against silent drift: every scenario must be baselined (so the
+    # no-regression gate protects new scenarios), and the baseline must not
+    # reference scenarios that no longer exist. If this fails, update baseline.json.
+    scenario_ids = {r["id"] for r in se._load(SCENARIOS)}
+    passing_ids = set(se._baseline_passing_ids(BASELINE))
+    assert scenario_ids == passing_ids, (
+        "scenarios missing from baseline.passing_ids: "
+        + str(sorted(scenario_ids - passing_ids))
+        + " | stale baseline ids: "
+        + str(sorted(passing_ids - scenario_ids)))
+
+
 def test_sample_run_has_no_regressions_against_baseline():
     report = se.score(se._load(SCENARIOS), se._load(SAMPLE))
     assert se.regressions(report, se._baseline_passing_ids(BASELINE)) == []

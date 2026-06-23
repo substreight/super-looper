@@ -120,6 +120,63 @@ def test_absent_evidence_is_failure_not_kept():
     assert kept == [] and len(reverted) == 1, (kept, reverted)
 
 
+def test_ratchet_keeps_passed_then_reverts_only_later_failure():
+    # A kept pass must survive a later failure: iter 1 passes -> keep change-1;
+    # iter 2 fails -> revert change-2 (the LATEST), leaving prior kept work intact.
+    # If revert wrongly rolled back everything, this would fail.
+    kept, reverted = [], []
+    results = iter([{"passed": True, "signal": "ok"}, {"passed": False, "signal": "bad"}])
+    _, propose = _counter()
+    res = run_loop(_spec(max_iterations=2),
+                   propose=propose,
+                   verify=lambda c: next(results),
+                   keep=lambda c, r: kept.append(c),
+                   revert=lambda c, r: reverted.append(c))
+    assert res.kept == 1, res
+    assert kept == ["change-1"], kept
+    assert reverted == ["change-2"], reverted
+
+
+def test_budget_check_happens_before_propose():
+    # The runtime cap is checked at the TOP of the loop, before propose, so when
+    # the budget is already spent the model is never called for that iteration.
+    ticks = {"v": -5.0}
+
+    def clock():
+        ticks["v"] += 5.0
+        return ticks["v"]
+
+    box, propose = _counter()
+    res = run_loop(_spec(max_iterations=99, budget={"max_runtime_seconds": 10}),
+                   propose=propose,
+                   verify=lambda c: {"passed": False, "signal": c},
+                   clock=clock)
+    assert res.reason == "budget", res
+    assert res.iterations == 1, res          # cap tripped before the 2nd propose
+    assert box["n"] == 1, box                # propose called exactly once
+
+
+def test_only_explicit_passed_true_keeps():
+    # Fail-closed contract: ONLY an explicit passed=True keeps. Truthy lookalikes
+    # (the string "true", 1, an {ok:True} dict, or absent) must revert.
+    _, propose = _counter()
+    for verdict, should_keep in (
+        ({"passed": True}, True),
+        ({"passed": "true"}, False),
+        ({"passed": 1}, False),
+        ({"ok": True}, False),
+        ({}, False),
+    ):
+        kept, reverted = [], []
+        run_loop(_spec(max_iterations=1),
+                 propose=propose,
+                 verify=lambda c, v=verdict: v,
+                 keep=lambda c, r: kept.append(c),
+                 revert=lambda c, r: reverted.append(c))
+        assert bool(kept) == should_keep, (verdict, kept, reverted)
+        assert bool(reverted) == (not should_keep), (verdict, reverted)
+
+
 def _run_all():
     fns = sorted((n, fn) for n, fn in globals().items()
                  if n.startswith("test_") and callable(fn))

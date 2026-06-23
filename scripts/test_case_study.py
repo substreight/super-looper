@@ -14,6 +14,9 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from super_looper.experimental.case_study import (  # noqa: E402
+    CaseStudyError,
+    _json_load,
+    _json_write,
     check_scope,
     create_manifest,
     design_case_study,
@@ -114,6 +117,34 @@ def test_scope_guard_rejects_outside_and_forbidden_paths():
     assert "secrets/token.txt" in result["inside_must_not_touch"], result
 
 
+def test_corrupt_json_file_raises_clean_case_study_error():
+    # Crash-corrupted evidence must surface as a clean CaseStudyError, never a raw
+    # json.JSONDecodeError traceback, so a harness can gate on it.
+    with tempfile.TemporaryDirectory() as root:
+        bad = os.path.join(root, "corrupt.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write("{this is not valid json")
+        raised = None
+        try:
+            _json_load(bad)
+        except Exception as exc:
+            raised = exc
+        assert isinstance(raised, CaseStudyError), f"expected CaseStudyError, got {type(raised).__name__}"
+
+
+def test_json_write_is_atomic_no_tmp_left_behind():
+    # _json_write writes via a temp file + atomic os.replace: after success the
+    # file holds exactly the payload and no .tmp sibling remains.
+    with tempfile.TemporaryDirectory() as root:
+        path = os.path.join(root, "nested", "out.json")
+        payload = {"evidence_level": "confirmed_local", "n": 7}
+        _json_write(path, payload)
+        with open(path, encoding="utf-8") as f:
+            assert json.load(f) == payload
+        leftover = [p for p in os.listdir(os.path.dirname(path)) if p.endswith(".tmp")]
+        assert leftover == [], leftover
+
+
 def test_case_study_design_run_verify_and_report():
     with tempfile.TemporaryDirectory() as root:
         case_dir = os.path.join(root, "compression-case")
@@ -140,6 +171,32 @@ def test_case_study_design_run_verify_and_report():
         assert verified["passed"], verified
         assert os.path.exists(os.path.join(run["run_dir"], "report-maintainer.md"))
         assert os.path.exists(os.path.join(run["run_dir"], "report-pr.md"))
+
+
+def test_direct_run_with_pathless_verifier_is_unconfirmed_not_pr_ready():
+    # A passing verifier with no file-path token (e.g. `echo ok`) cannot be
+    # statically confirmed as a real gate, so a DIRECT `case-study run` must
+    # label it 'unconfirmed' (never confirmed_local / ready_for_pr_claim) --
+    # matching resolve_verifier's no-path-token branch. Without this, the direct
+    # run path silently bypasses the evidence-as-proof fence.
+    with tempfile.TemporaryDirectory() as root:
+        repo = os.path.join(root, "repo")
+        os.makedirs(repo)
+        case_dir = os.path.join(root, "case")
+        created = create_manifest(
+            case_dir,
+            "https://example.test/repo.git",
+            verifier=["echo ok"],
+            may_touch=["src/"],
+            must_not_touch=["secrets/"],
+            max_runtime_seconds=60,
+        )
+        _write_json(os.path.join(case_dir, "answers.json"), ANSWERS)
+        design_case_study(created["manifest_path"])
+
+        run = run_case_study(created["manifest_path"], repo, run_id="run-1")
+        assert run["summary"]["evidence_level"] == "unconfirmed", run["summary"]
+        assert run["summary"]["ready_for_pr_claim"] is False, run["summary"]
 
 
 def test_case_study_scope_guard_sees_untracked_files():

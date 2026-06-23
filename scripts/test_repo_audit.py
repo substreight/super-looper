@@ -26,6 +26,7 @@ from super_looper.experimental.repo_audit import (  # noqa: E402
     _has_shell_control_metacharacters,
     _is_destructive,
     _requires_network,
+    _split_ci_command,
 )
 
 
@@ -257,6 +258,22 @@ def test_verify_gate_inventory_records_pass_fail_and_skips_unsafe():
     assert strengths["gate-network"] == "unverified"
 
 
+def test_verify_gate_inventory_truncates_captured_output_in_audit_tail():
+    # Captured gate stdout/stderr is persisted into repo-audit.json; cap it so a
+    # gate that dumps a secret-bearing log can't exfiltrate thousands of chars.
+    with tempfile.TemporaryDirectory() as repo:
+        gates = [{
+            "id": "verbose",
+            "command": f"{sys.executable} -c \"print(str(1)*1000)\"",
+            "requires_network": False,
+            "destructive": False,
+        }]
+        verified = verify_gate_inventory(repo, gates, timeout_seconds=10)
+    tail = verified[0]["verification"]["stdout_tail"]
+    assert len(tail) <= 500, len(tail)
+    assert len(tail) >= 1, tail
+
+
 def test_verify_gate_inventory_refuses_shell_control_commands():
     # A crafted "verifier" gate that smuggles a redirect/pipe/chain must never be
     # handed to shell=True. The network/destructive substring skips are evadable,
@@ -329,8 +346,21 @@ def test_has_shell_control_metacharacters_allows_real_gates():
         "echo $(whoami)",
         "echo ${HOME}",
         "pytest `id`",
+        "echo $HOME",          # bare variable expansion: a crafted gate must not read runner env
+        "cp $SECRET out",
     ):
         assert _has_shell_control_metacharacters(hostile) is True, hostile
+
+
+def test_split_ci_command_splits_chains_without_spaces():
+    # Chained CI commands WITHOUT spaces around && / || must still split, or the
+    # whole chain survives as one gate that verify then refuses -- silently
+    # dropping a real gate.
+    assert _split_ci_command("ruff check .&&pytest") == ["ruff check .", "pytest"]
+    assert _split_ci_command("a||b") == ["a", "b"]
+    assert _split_ci_command("pytest;coverage report") == ["pytest", "coverage report"]
+    # spaced forms still split (regression guard)
+    assert _split_ci_command("ruff . && pytest") == ["ruff .", "pytest"]
 
 
 def test_is_destructive_catches_package_and_filesystem_removal():
